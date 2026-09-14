@@ -40,17 +40,16 @@ jobs:
           # 在仓库 Settings → Pages 选 "GitHub Actions" 作为发布源
           # 在 Settings → Secrets and variables → Actions → Variables 配置：
           #   API_BASE（必填）：Linux 服务器上的 API 域名，如 https://api.example.com
-          #   BASE_PATH（可选）：默认按仓库名推导 /<repo>/；
-          #                     用户主页仓库 <user>.github.io 或自定义域名设为 /
+          #   BASE_PATH（可选）：默认 './'（相对路径，同时兼容 /<repo>/ 项目地址与自定义根域名）；
+          #                     仅在有特殊需求时覆盖
           #   FILMGRAB_BASE（可选）：剧照服务挂载前缀，如
           #                     https://api.example.com/filmgrab；不部署则留空（区块自动隐藏）
           VITE_API_BASE: ${{ vars.API_BASE }}
           VITE_FILMGRAB_BASE: ${{ vars.FILMGRAB_BASE }}
         run: |
-          if [ -z "${{ vars.BASE_PATH }}" ]; then
-            BASE_PATH="/${GITHUB_REPOSITORY#*/}/"
-          else
-            BASE_PATH="${{ vars.BASE_PATH }}"
+          BASE_PATH="${{ vars.BASE_PATH }}"
+          if [ -z "$BASE_PATH" ]; then
+            BASE_PATH="./"   # 相对路径：github.io/<repo>/ 与自定义域名根路径都能正确加载资源
           fi
           echo "Using BASE_PATH=$BASE_PATH"
           BASE_PATH="$BASE_PATH" npm run build

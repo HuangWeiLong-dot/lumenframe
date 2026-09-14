@@ -106,7 +106,7 @@ export default function Header({ onHome }) {
         <div className="absolute bottom-5 right-5">
           {/* @ts-expect-error custom element */}
           <author-avatar
-            src="/avatar/1.jpg"
+            src={`${import.meta.env.BASE_URL}avatar/1.jpg`}
             href="https://liveinpassion.me"
             target="_blank"
             alt="Author Avatar"

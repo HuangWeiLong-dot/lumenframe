@@ -122,7 +122,7 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setActive(src) }}
                     aria-label="Preview still"
-                    className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-xs text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/80"
+                    className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-xs text-white opacity-100 transition hover:bg-black/80 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     ⤢
                   </button>
