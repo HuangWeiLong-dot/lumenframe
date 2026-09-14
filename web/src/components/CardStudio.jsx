@@ -274,8 +274,13 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           />
           {/* 悬浮/触摸提示：点击放大 */}
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition duration-200 group-hover:bg-black/25 group-hover:opacity-100">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-lg text-white">
-              ⤢
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white">
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
             </span>
           </span>
         </button>

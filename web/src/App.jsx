@@ -502,9 +502,14 @@ export default function App() {
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setActivePoster(full) }}
                           aria-label="Preview poster"
-                          className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-xs text-white opacity-100 transition hover:bg-black/80 sm:opacity-0 sm:group-hover:opacity-100"
+                          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition hover:bg-black/80 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                         >
-                          ⤢
+                          <svg className="h-4 w-4 sm:h-3.5 sm:w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <polyline points="15 3 21 3 21 9" />
+                            <polyline points="9 21 3 21 3 15" />
+                            <line x1="21" y1="3" x2="14" y2="10" />
+                            <line x1="3" y1="21" x2="10" y2="14" />
+                          </svg>
                         </button>
 
                         {isSelected && (
@@ -581,9 +586,14 @@ export default function App() {
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setActiveBackdrop(full) }}
                         aria-label="Preview backdrop"
-                        className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-xs text-white opacity-100 transition hover:bg-black/80 sm:opacity-0 sm:group-hover:opacity-100"
+                        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white opacity-100 transition hover:bg-black/80 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                       >
-                        ⤢
+                        <svg className="h-4 w-4 sm:h-3.5 sm:w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="15 3 21 3 21 9" />
+                          <polyline points="9 21 3 21 3 15" />
+                          <line x1="21" y1="3" x2="14" y2="10" />
+                          <line x1="3" y1="21" x2="10" y2="14" />
+                        </svg>
                       </button>
 
                       {isSelected && (
