@@ -184,9 +184,10 @@ export function mcColor(score) {
   return { bg: '#E8402D', fg: '#FFFFFF' }
 }
 
-// 个人评分颜色分级：0-3 红，4-6 黄，7-9 绿，10 白
+// 个人评分颜色分级：满分 10 金，7-9 绿，4-6 黄，0-3 红
+export const MY_SCORE_GOLD = { bg: '#D4AF37', fg: '#1A1500' }
 export function personalColor(score) {
-  if (score >= 10) return { bg: '#FFFFFF', fg: '#1A1500' }
+  if (score >= 10) return MY_SCORE_GOLD
   if (score >= 7) return { bg: '#66CC33', fg: '#0C2A05' }
   if (score >= 4) return { bg: '#FFCC33', fg: '#332600' }
   return { bg: '#E8402D', fg: '#FFFFFF' }
@@ -265,8 +266,8 @@ export function drawRatings(ctx, x, y, maxWidth, data) {
     chips.push({ value: ratings.metacritic, label: 'Metascore · /100', bg: c.bg, fg: c.fg })
   }
   if (personal > 0) {
-    const accentDark = isDark(theme.accent)
-    chips.push({ star: '♥', value: personal, label: 'My score · /10', bg: theme.accent, fg: accentDark ? '#FFFFFF' : '#1A1500' })
+    const pc = personalColor(personal)
+    chips.push({ star: '♥', value: personal, label: 'My score · /10', bg: pc.bg, fg: pc.fg })
   }
   if (chips.length === 0) return 0
 
