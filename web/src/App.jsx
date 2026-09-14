@@ -6,7 +6,44 @@ import FilmGrabShots from './components/FilmGrabShots'
 import Footer from './components/Footer'
 import Header from './components/Header'
 import { useTrending } from './hooks/useTrending'
-import { apiUrl, posterUrl } from './api'
+import { apiUrl, posterUrl, downloadImage } from './api'
+
+// ---- 极简 History API 路由 ----
+// 路由格式：{BASE}movie/{tmdbId}-{片名 slug}，如 /movie/123-dead-poets-society
+// id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省
+
+// 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
+// 深链 /movie/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
+function getBasePath() {
+  const p = window.location.pathname
+  const i = p.indexOf('/movie/')
+  if (i >= 0) return p.slice(0, i + 1)
+  if (p.endsWith('/')) return p
+  return p.slice(0, p.lastIndexOf('/') + 1)
+}
+const BASE_PATH = getBasePath()
+
+function slugify(title) {
+  return String(title || '')
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+function movieUrl(id, title) {
+  const slug = slugify(title)
+  return `${BASE_PATH}movie/${id}${slug ? `-${slug}` : ''}`
+}
+
+// 从当前 location 解析电影路由；非电影页返回 null
+function parseMovieRoute() {
+  const m = window.location.pathname.match(/\/movie\/(\d+)(?:-.*)?\/?$/)
+  return m ? Number(m[1]) : null
+}
+
 
 // 滚动海报背景墙（Canvas 绘制，海报来源 = TMDB 本周热门）
 function PosterBackground() {
@@ -131,7 +168,9 @@ export default function App() {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [error, setError] = useState('')
   const [movie, setMovie] = useState(null)
-  const [detailLoading, setDetailLoading] = useState(false)
+  // 首屏若是深链（/movie/...），直接进入加载态，避免首页闪一下
+  const initialMovieIdRef = useRef(parseMovieRoute())
+  const [detailLoading, setDetailLoading] = useState(initialMovieIdRef.current != null)
   const [specs, setSpecs] = useState(null)
   const [specsLoading, setSpecsLoading] = useState(false)
   const [ratings, setRatings] = useState(null)
@@ -148,6 +187,9 @@ export default function App() {
   const searchBoxRef = useRef(null)
   // 每次打开电影自增；过期异步响应（旧电影晚到的 specs/ratings/images）一律丢弃
   const reqTokenRef = useRef(0)
+  // 当前电影页能否用浏览器后退：应用内点选进来为 true（回到上一页）；
+  // 深链直接打开为 false（Back 按钮改走回主页）
+  const canBackRef = useRef(false)
 
   // 灯箱：Esc 关闭（Backdrops / Posters 共用）
   useEffect(() => {
@@ -278,7 +320,21 @@ export default function App() {
     if (movie) localStorage.setItem(`lumenframe:myrating:${movie.id}`, String(v))
   }
 
-  async function openMovie(id) {
+  // 清空当前电影的全部视图状态（回主页 / 前进后退到主页时复用）
+  function resetMovieView() {
+    setError('')
+    setCardImage(null)
+    setActiveBackdrop(null)
+    setActivePoster(null)
+    setSpecs(null)
+    setRatings(null)
+    setBackdrops([])
+    setPosters([])
+    setMovie(null)
+  }
+
+  // history: 'push' 点击选片（新增历史条目）；'none' 前进后退/深链/首屏（URL 已就位）
+  async function openMovie(id, { history = 'push', scroll = true } = {}) {
     // 新请求使所有在途旧请求失效，杜绝快速切换时旧电影数据串到新电影页面
     const token = ++reqTokenRef.current
     setDetailLoading(true)
@@ -299,7 +355,15 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Failed to load movie')
       setMovie(data)
       setPersonal(Number(localStorage.getItem(`lumenframe:myrating:${data.id}`)) || 0)
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      // 同步规范 URL（含正式片名 slug）；popstate/深链只在 slug 缺失或不符时 replace
+      const canonical = movieUrl(data.id, data.title)
+      if (history === 'push') {
+        window.history.pushState({ movieId: data.id }, '', canonical)
+        canBackRef.current = true
+      } else if (window.location.pathname !== canonical) {
+        window.history.replaceState({ movieId: data.id }, '', canonical)
+      }
+      if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
       loadSpecs(data, token)
       loadRatings(data, token)
       loadImages(id, token)
@@ -310,10 +374,46 @@ export default function App() {
     }
   }
 
+  // 回主页：清状态 + URL 回根（已是根则不入栈）
+  function goHome() {
+    reqTokenRef.current++
+    resetMovieView()
+    if (window.location.pathname !== BASE_PATH) {
+      window.history.pushState({ home: true }, '', BASE_PATH)
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // 首屏深链直开
+  useEffect(() => {
+    if (initialMovieIdRef.current != null) {
+      openMovie(initialMovieIdRef.current, { history: 'none', scroll: false })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 浏览器前进 / 后退
+  useEffect(() => {
+    const onPop = () => {
+      const id = parseMovieRoute()
+      // 后退/前进到电影页时仍可继续后退；落到主页则 Back 应回主页
+      canBackRef.current = id != null
+      if (id != null) {
+        openMovie(id, { history: 'none', scroll: false })
+      } else {
+        reqTokenRef.current++
+        resetMovieView()
+      }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <div className="flex min-h-screen flex-col">
       <PosterBackground />
-      <Header onHome={() => { setMovie(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />
+      <Header onHome={goHome} />
       {/* 首页（搜索 + Trending）通栏铺满，移动端仅留小边距；详情页保持 1024 居中阅读宽度 */}
       <main
         className={`mx-auto flex w-full flex-1 flex-col pt-24 ${
@@ -323,7 +423,7 @@ export default function App() {
       >
       <h1>
         <button
-          onClick={() => { setMovie(null); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+          onClick={goHome}
           className="block w-full text-center text-5xl font-bold uppercase tracking-tight text-black transition hover:opacity-70"
         >
           LUMENFRAME
@@ -406,8 +506,23 @@ export default function App() {
       {detailLoading && <p className="mt-8 text-sm text-zinc-600">Loading…</p>}
 
       {movie && !detailLoading && (
+        // 返回：应用内进入走浏览器历史；深链直开（无上一页）则回主页
+        <button
+          type="button"
+          onClick={() => (canBackRef.current ? window.history.back() : goHome())}
+          className="mt-8 inline-flex w-fit items-center gap-2 text-xs uppercase tracking-[0.2em] text-zinc-600 transition hover:text-black"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          Back
+        </button>
+      )}
+
+      {movie && !detailLoading && (
         // 移动端纵向堆叠（海报居中在上、信息在下全宽）；sm 及以上恢复海报左 + 信息右
-        <section className="mt-10 flex flex-col items-center gap-5 sm:mt-12 sm:flex-row sm:items-start sm:gap-6">
+        <section className="mt-6 flex flex-col items-center gap-5 sm:mt-8 sm:flex-row sm:items-start sm:gap-6">
           {/* 只固定宽度，高度按海报真实比例自适应：完整、不拉伸、不裁切、无白边 */}
           {movie.poster_path ? (
             <img
@@ -538,6 +653,18 @@ export default function App() {
             crossOrigin="anonymous"
             className="max-h-[90vh] max-w-[92vw] object-contain"
           />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); downloadImage(activePoster, `${movie?.title || 'poster'} - poster.jpg`) }}
+            aria-label="Download poster"
+            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -621,6 +748,18 @@ export default function App() {
             crossOrigin="anonymous"
             className="max-h-[90vh] max-w-[92vw] object-contain"
           />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); downloadImage(activeBackdrop, `${movie?.title || 'backdrop'} - backdrop.jpg`) }}
+            aria-label="Download backdrop"
+            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
         </div>
       )}
 

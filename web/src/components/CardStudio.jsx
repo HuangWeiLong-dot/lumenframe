@@ -28,7 +28,7 @@ const OPTIONS = [
 const PREVIEW_WIDTH = 440
 
 const pill = (active) =>
-  `border px-3 py-1.5 text-sm transition ${
+  `border px-3 py-1.5 text-center text-sm transition ${
     active
       ? 'border-black bg-black text-white'
       : 'border-zinc-300 bg-white text-zinc-600 hover:border-black'
@@ -65,18 +65,25 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
   const currentTpl = TEMPLATES.find((t) => t.id === config.template)
   const supportedSizes = currentTpl?.sizes || SIZES.map((s) => s.id)
   const visibleSizes = SIZES.filter((s) => supportedSizes.includes(s.id))
-  // 横版预览以高度为约束（440 宽会让 1920x1080 预览过高）；
-  // 再按容器实测宽度收窄——窄屏手机上预览永不溢出，且比例始终严格等于所选尺寸
+  // 固定展示槽：正方形，边长只取决于容器宽度（与所选比例无关）。
+  // 两种最极端比例恰好各占一边：9:16 高=边长（宽 440），16:9 宽=边长（高 440），
+  // 其余比例等比居中。切换比例时槽尺寸不变，下方按钮不发生位移。
+  const ratio = size.h / size.w
+  const slot = Math.min(availW, PREVIEW_WIDTH * (16 / 9))
+  const slotW = slot
+  const slotH = slot
   const desiredW = landscape ? PREVIEW_WIDTH * (size.w / size.h) : PREVIEW_WIDTH
-  const previewW = Math.min(desiredW, availW)
-  const previewH = (size.h / size.w) * previewW
+  const previewW = Math.min(desiredW, slotW, slotH / ratio)
+  const previewH = ratio * previewW
   const set = (patch) => setConfig((c) => ({ ...c, ...patch }))
 
-  // 测量预览区可用宽度（含 RO：旋转屏/地址栏收放都即时重算）
+  // 测量预览区可用宽度（RO：旋转屏/窗口缩放即时重算）
   useLayoutEffect(() => {
     const el = previewAreaRef.current
     if (!el) return
-    const update = () => setAvailW(el.clientWidth)
+    const update = () => {
+      setAvailW(el.clientWidth)
+    }
     update()
     const ro = new ResizeObserver(update)
     ro.observe(el)
@@ -137,7 +144,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
     .join(' & ')
 
   return (
-    <section className="mt-10 border-t border-b border-zinc-300 py-6">
+    <section className="mt-10 flex flex-col border-t border-b border-zinc-300 py-6">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-600">Card Studio</h3>
         <button onClick={download} disabled={exporting} className={pill(true)}>
@@ -145,54 +152,71 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
         </button>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      {/* 所有设备统一：海报吸顶在上，控件在下 */}
+      <div className="flex flex-col">
+      {/* 控件组 */}
+      <div className="order-2">
+      <div className="mt-4 flex flex-col gap-2">
         <span className={label}>Template</span>
-        {TEMPLATES.map((t) => (
-          <button key={t.id} onClick={() => pickTemplate(t.id)} className={pill(config.template === t.id)}>
-            {t.label}
-          </button>
-        ))}
+        <div className="grid grid-cols-3 gap-2">
+          {TEMPLATES.map((t) => (
+            <button key={t.id} onClick={() => pickTemplate(t.id)} className={pill(config.template === t.id)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-col gap-2">
         <span className={label}>Size</span>
-        {visibleSizes.map((s) => (
-          <button key={s.id} onClick={() => set({ size: s.id })} className={pill(config.size === s.id)}>
-            {s.id}
-          </button>
-        ))}
+        <div
+          className="grid gap-2"
+          style={{ gridTemplateColumns: `repeat(${visibleSizes.length}, minmax(0, 1fr))` }}
+        >
+          {visibleSizes.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => set({ size: s.id })}
+              className={`${pill(config.size === s.id)} px-1`}
+            >
+              {s.id}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-col gap-2">
         <span className={label}>Background</span>
-        {COLORS.map((c) => (
-          <button
-            key={c}
-            onClick={() => set({ bgColor: c })}
-            style={{ background: c }}
-            aria-label={`color ${c}`}
-            className={`h-6 w-6 border transition ${
-              config.bgColor === c ? 'border-black ring-1 ring-black ring-offset-1' : 'border-zinc-300'
-            }`}
+        <div className="flex flex-wrap items-center gap-2">
+          {COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={() => set({ bgColor: c })}
+              style={{ background: c }}
+              aria-label={`color ${c}`}
+              className={`h-6 w-6 border transition ${
+                config.bgColor === c ? 'border-black ring-1 ring-black ring-offset-1' : 'border-zinc-300'
+              }`}
+            />
+          ))}
+          <input
+            type="color"
+            value={config.bgColor}
+            onChange={(e) => set({ bgColor: e.target.value })}
+            aria-label="custom color"
+            className="h-6 w-8 cursor-pointer border border-zinc-300 bg-white"
           />
-        ))}
-        <input
-          type="color"
-          value={config.bgColor}
-          onChange={(e) => set({ bgColor: e.target.value })}
-          aria-label="custom color"
-          className="h-6 w-8 cursor-pointer border border-zinc-300 bg-white"
-        />
+        </div>
       </div>
 
       <div className="mt-4">
         <span className={label}>Show</span>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-2 gap-2">
           {OPTIONS.map((o) => (
             <button
               key={o.key}
               onClick={() => set({ [o.key]: !config[o.key] })}
-              className={`w-full border px-3 py-2 text-sm transition ${
+              className={`w-full border px-3 py-2 text-center text-sm transition ${
                 config[o.key]
                   ? 'border-black bg-black text-white'
                   : 'border-zinc-300 bg-white text-zinc-600 hover:border-black'
@@ -205,10 +229,11 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
       </div>
 
       <div
-        className="mt-3 flex flex-wrap items-center gap-2"
+        className="mt-3 flex flex-col gap-2"
         onMouseLeave={() => setHoverRating(0)}
       >
-        <span className={label}>Your rating</span>
+        <span className={label}>My rating</span>
+        <div className="flex flex-wrap items-center gap-1">
         {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
           // 悬浮时预览悬停位置（前 N 颗全亮），否则显示已选评分
           const lit = n <= (hoverRating || personal)
@@ -219,7 +244,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               onMouseEnter={() => setHoverRating(n)}
               onMouseLeave={() => setHoverRating(0)}
               aria-label={`rate ${n}`}
-              className={`text-lg leading-none transition ${lit ? 'text-amber-500' : 'text-zinc-300'}`}
+              className={`text-base leading-none transition ${lit ? 'text-amber-500' : 'text-zinc-300'}`}
             >
               ★
             </button>
@@ -230,6 +255,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
             clear
           </button>
         )}
+        </div>
       </div>
 
       <div className="mt-4 text-xs text-zinc-600">
@@ -251,14 +277,22 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           </button>
         </div>
       )}
+      </div>
 
-      {/* 预览区：宽度按容器实测收窄，卡片严格保持所选尺寸比例，不拉伸不裁切 */}
-      <div ref={previewAreaRef} className="mt-5 flex w-full flex-col items-center">
+      {/* 预览：普通文档流，海报在控件上方；固定展示槽，无白框无吸顶 */}
+      <div className="order-1 mt-5 w-full">
+      {/* 测量层：占满整行宽度 */}
+      <div ref={previewAreaRef} className="flex w-full justify-center">
+        {/* 固定槽：尺寸只随容器宽度变化，切比例时不变，海报在内等比居中 */}
+        <div
+          className="relative flex items-center justify-center overflow-hidden"
+          style={{ width: slotW, height: slotH }}
+        >
         <button
           type="button"
           onClick={openPreview}
           aria-label="Preview generated card"
-          className="group relative block overflow-hidden shadow-md ring-1 ring-zinc-200 transition hover:ring-black"
+          className="group relative block overflow-hidden ring-0 transition-[width,height] duration-200 ease-out"
           style={{ width: previewW, height: previewH }}
         >
           <Card
@@ -284,7 +318,9 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
             </span>
           </span>
         </button>
-        <p className="mt-2 text-center text-xs text-zinc-500">Tap the card to preview full size · {config.size}</p>
+        </div>
+      </div>
+      </div>
       </div>
 
       {previewUrl && (

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
-import { FILMGRAB_BASE } from '../api'
+import { FILMGRAB_BASE, downloadImage } from '../api'
 
 // 开发态默认走 Vite 的 /filmgrab 代理；公网构建只有配置了 VITE_FILMGRAB_BASE 才启用
 // （FilmGrab 不接受爬取，请仅在自有/可信服务器上开启）
@@ -156,6 +156,18 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
             crossOrigin="anonymous"
             className="max-h-[90vh] max-w-[92vw] object-contain"
           />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); downloadImage(active, `${title} - still.jpg`) }}
+            aria-label="Download still"
+            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
         </div>
       )}
     </>

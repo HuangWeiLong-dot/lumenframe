@@ -266,7 +266,7 @@ export function drawRatings(ctx, x, y, maxWidth, data) {
   }
   if (personal > 0) {
     const accentDark = isDark(theme.accent)
-    chips.push({ star: '♥', value: personal, label: 'Your score · /10', bg: theme.accent, fg: accentDark ? '#FFFFFF' : '#1A1500' })
+    chips.push({ star: '♥', value: personal, label: 'My score · /10', bg: theme.accent, fg: accentDark ? '#FFFFFF' : '#1A1500' })
   }
   if (chips.length === 0) return 0
 

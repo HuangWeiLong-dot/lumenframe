@@ -130,6 +130,24 @@ function wrapTextLines(ctx, text, maxWidth, fontSize, lineHeight, maxLines) {
   return { lines, lineHeight: fontSize * lineHeight }
 }
 
+// 自适应标题：自动缩小字号直到 maxLines 内放得下，不加省略号
+function drawTitle(ctx, text, x, y, maxWidth, opts = {}) {
+  const { fontSize: baseSize, maxLines = 2, fontWeight = 'normal', fontFamily = 'sans-serif', transform = 'none', lineHeight = 1.02, ...rest } = opts
+  let displayText = String(text || '')
+  if (transform === 'uppercase') displayText = displayText.toUpperCase()
+  let fs = baseSize
+  const minFs = Math.max(18, Math.floor(baseSize * 0.5))
+  ctx.save()
+  while (fs > minFs) {
+    ctx.font = `${fontWeight} ${fs}px ${fontFamily}`
+    const { lines } = wrapText(ctx, displayText, maxWidth, fs, lineHeight, 999, false)
+    if (lines.length <= maxLines) break
+    fs -= 2
+  }
+  ctx.restore()
+  return drawText(ctx, text, x, y, maxWidth, { ...rest, fontSize: fs, maxLines, fontWeight, fontFamily, transform, lineHeight, ellipsis: false })
+}
+
 // ============ 模板绘制函数 ============
 
 // 1. Minimal
@@ -145,7 +163,7 @@ function drawMinimal(ctx, p) {
     const tx = P + pw + 44
     const tw = W - tx - P
     let cy = P
-    const { height: th } = drawText(ctx, movie.title, tx, cy, tw, { fontSize: 74 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 74 * fs })
+    const { height: th } = drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 74 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 74 * fs })
     cy += th + 16
     if (cfg.showYear && movie.year) {
       const { height: yh } = drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55 })
@@ -171,7 +189,7 @@ function drawMinimal(ctx, p) {
     drawImageCover(ctx, posterImg, P, P, W - P * 2, ph, false)
     let cy = P + ph + 28
     const tw = W - P * 2
-    const { height: th } = drawText(ctx, movie.title, P, cy, tw, { fontSize: 60 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 60 * fs })
+    const { height: th } = drawTitle(ctx, movie.title, P, cy, tw, { fontSize: 60 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 60 * fs })
     cy += th + 16
     if (cfg.showYear && movie.year) {
       const { height: yh } = drawText(ctx, movie.year, P, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55 })
@@ -252,7 +270,7 @@ function drawMagazine(ctx, p) {
   if (landscape) {
     drawText(ctx, 'Now Showing', tx, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase' })
     cy += 14 * fs * 1.25 + 8
-    const { height: th } = drawText(ctx, movie.title, tx, cy, tw, { fontSize: 80 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 80 * fs, transform: 'uppercase' })
+    const { height: th } = drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 80 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 80 * fs, transform: 'uppercase' })
     cy += th + 8
     if (cfg.showYear && movie.year) {
       const { height: yh } = drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7 })
@@ -269,7 +287,7 @@ function drawMagazine(ctx, p) {
   } else {
     drawText(ctx, 'Now Showing', tx, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase' })
     cy += 14 * fs * 1.25 + 8
-    cy += drawText(ctx, movie.title, tx, cy, tw, { fontSize: 72 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 72 * fs, transform: 'uppercase' }).height + 8
+    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 72 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 72 * fs, transform: 'uppercase' }).height + 8
     if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7 }).height + 12
     cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8 }) + 12
     if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.88 }).height + 12
@@ -311,7 +329,7 @@ function drawNoir(ctx, p) {
     const tw = W - tx - 48
     let cy = H / 2 - 130
     cy += drawText(ctx, 'A Film', tx, cy, tw, { fontSize: 16 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 16 * fs, transform: 'uppercase', opacity: 0.5 }).height + 10
-    cy += drawText(ctx, movie.title, tx, cy, tw, { fontSize: 64 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
+    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 64 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
     if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5 }).height + 14
     cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.82 }) + 14
     if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6 }).height + 14
@@ -326,7 +344,7 @@ function drawNoir(ctx, p) {
     const tw = W - P * 2
     let cy = ph + 28
     cy += drawText(ctx, 'A Film', tx, cy, tw, { fontSize: 15 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 15 * fs, transform: 'uppercase', opacity: 0.5 }).height + 10
-    cy += drawText(ctx, movie.title, tx, cy, tw, { fontSize: 54 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
+    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 54 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
     if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5 }).height + 14
     cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8 }) + 14
     if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6 }).height + 14
@@ -488,7 +506,7 @@ function drawInfoCard(ctx, p) {
     h += 13 * s * 1.25 + 14 * s                                      // eyebrow
     const titleFs = (landscape ? 56 : 46) * s
     ctx.save(); ctx.font = `900 ${titleFs}px ${fontFamily}`
-    h += wrapText(ctx, movie.title, panelW, titleFs, 1.04, 2).height
+    h += wrapText(ctx, movie.title, panelW, titleFs, 1.04, 2, false).height
     ctx.restore()
     if (cfg.showYear && movie.year) h += 14 * s + 20 * s * 1.25
     if (hasRatings) h += 14 * s + 47
@@ -526,7 +544,7 @@ function drawInfoCard(ctx, p) {
   const titleFs = (landscape ? 56 : 46) * s
   cy += drawText(ctx, movie.title, cx, cy, panelW, {
     fontSize: titleFs, color: ink, fontFamily, fontWeight: 900,
-    lineHeight: 1.04, maxLines: 2, align: 'center', shadow: textShadow,
+    lineHeight: 1.04, maxLines: 2, align: 'center', shadow: textShadow, ellipsis: false,
   }).height
 
   if (cfg.showYear && movie.year) {

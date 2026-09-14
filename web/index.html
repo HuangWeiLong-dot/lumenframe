@@ -7,6 +7,23 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      // GitHub Pages SPA 回退配套：404.html 把深链编码成 /?_spa=movie/... 跳到根，
+      // React 挂载前在这里把干净的深链 URL 还原（replaceState，不刷新、不入栈）
+      ;(function () {
+        var m = window.location.search.match(/([?&])_spa=([^&]*)/)
+        if (!m) return
+        var target = decodeURIComponent(m[2])
+        var sp = new URLSearchParams(window.location.search)
+        sp.delete('_spa')
+        var qs = sp.toString()
+        window.history.replaceState(
+          null,
+          '',
+          (target || window.location.pathname) + (qs ? '?' + qs : '') + window.location.hash
+        )
+      })()
+    </script>
   </head>
   <body style="background:#fff;color:#141414;font-family:'Inter',Arial,sans-serif">
     <div id="root"></div>
