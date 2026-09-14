@@ -1,0 +1,72 @@
+name: Deploy web to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+# 同一时间只允许一个 Pages 部署
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        env:
+          # 在仓库 Settings → Pages 选 "GitHub Actions" 作为发布源
+          # 在 Settings → Secrets and variables → Actions → Variables 配置：
+          #   API_BASE（必填）：Linux 服务器上的 API 域名，如 https://api.example.com
+          #   BASE_PATH（可选）：默认按仓库名推导 /<repo>/；
+          #                     用户主页仓库 <user>.github.io 或自定义域名设为 /
+          #   FILMGRAB_BASE（可选）：剧照服务挂载前缀，如
+          #                     https://api.example.com/filmgrab；不部署则留空（区块自动隐藏）
+          VITE_API_BASE: ${{ vars.API_BASE }}
+          VITE_FILMGRAB_BASE: ${{ vars.FILMGRAB_BASE }}
+        run: |
+          if [ -z "${{ vars.BASE_PATH }}" ]; then
+            BASE_PATH="/${GITHUB_REPOSITORY#*/}/"
+          else
+            BASE_PATH="${{ vars.BASE_PATH }}"
+          fi
+          echo "Using BASE_PATH=$BASE_PATH"
+          BASE_PATH="$BASE_PATH" npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

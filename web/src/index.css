@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* 防止任何全宽元素（如 100vw）撑出横向滚动条 */
+html,
+body {
+  overflow-x: hidden;
+}
+
+/* 海报背景墙（Canvas 绘制） */
+.poster-wall {
+  position: fixed;
+  inset: 0;
+  z-index: -10;
+  overflow: hidden;
+}
+
+.poster-wall canvas {
+  display: block;
+  filter: grayscale(0.4) contrast(1.02) saturate(0.8);
+}
+
+/* 白色遮罩，保证前景文字/图片与背景的强对比 */
+.poster-wall::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
