@@ -81,8 +81,16 @@ export default function WhereToWatch({ movie }) {
     }
   }, [tmdbId])
 
-  // 出错：静默隐藏；无来源：显示提示
-  if (status === 'error') return null
+  // 出错也保留区块，显示网络问题
+  if (status === 'error') {
+    return (
+      <CollapsibleSection title="Where to Watch">
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
+          Streaming service unavailable right now.
+        </div>
+      </CollapsibleSection>
+    )
+  }
 
   // 按类型分组，保持 TYPE_ORDER 顺序
   const grouped = TYPE_ORDER

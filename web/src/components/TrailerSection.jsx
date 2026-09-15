@@ -131,8 +131,25 @@ export default function TrailerSection({ movie }) {
     return () => { alive = false }
   }, [videoId])
 
-  // 预告片不可达：静默隐藏；正常但无预告片：也隐藏整个模块
-  if (status === 'error' || (status === 'done' && !trailer)) return null
+  // 预告片不可达或正常但无预告片：仍保留区块，提示状态
+  if (status === 'error') {
+    return (
+      <CollapsibleSection title="Trailer">
+        <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+          Trailer service unavailable right now.
+        </div>
+      </CollapsibleSection>
+    )
+  }
+  if (status === 'done' && !trailer) {
+    return (
+      <CollapsibleSection title="Trailer">
+        <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+          No trailer found for this title.
+        </div>
+      </CollapsibleSection>
+    )
+  }
 
   const headerAction = trailer && (
     <a

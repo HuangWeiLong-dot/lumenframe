@@ -58,8 +58,25 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [active])
 
-  // 未配置剧照服务或服务异常时静默隐藏；正常返回但该片未收录时给出明确提示
-  if (!ENABLED || status === 'error') return null
+  // 未配置剧照服务或服务异常：显示区块 + 提示，而不是静默消失
+  if (!ENABLED) {
+    return (
+      <CollapsibleSection title="Film Stills">
+        <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+          Film Stills service is not configured.
+        </div>
+      </CollapsibleSection>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <CollapsibleSection title="Film Stills">
+        <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+          Film Stills service unavailable right now.
+        </div>
+      </CollapsibleSection>
+    )
+  }
 
   const headerAction = (
     <a

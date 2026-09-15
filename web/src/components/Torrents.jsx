@@ -3,7 +3,7 @@ import CollapsibleSection from './CollapsibleSection'
 import { FILMGRAB_BASE } from '../api'
 
 // 走 FilmGrab FastAPI 的 /api/torrent/v1（本地经 Vite /filmgrab 代理，
-// 公网经 Nginx /filmgrab -> /api 重写）；未配置服务时整块自动隐藏。
+// 公网经 Nginx /filmgrab -> /api 重写）；未配置服务时显示未配置提示。
 const ENABLED = FILMGRAB_BASE !== ''
 
 // 电影向站点：并行查询、单点失败不影响其它站点。
@@ -207,9 +207,6 @@ export default function Torrents({ movie }) {
 
   useEffect(() => {
     if (!title || !ENABLED) return
-    // 与 FilmGrabShots 相同的 StrictMode 处理：延迟一宏任务发请求，
-    // 用 alive 标志丢弃过期响应；超时用 Promise.race 而非 AbortController，
-    // 避免开发态控制台出现 net::ERR_ABORTED 噪音。
     let alive = true
     setStatus('loading')
     setRows([])
@@ -224,11 +221,9 @@ export default function Torrents({ movie }) {
           if (r.status === 'fulfilled') merged.push(...r.value)
         })
         if (merged.length === 0) {
-          // 所有站点均无结果（服务不可用/网络受限/站点被墙）：整块隐藏
           setStatus('error')
           return
         }
-        // 按磁力 hash 或 名称+体积 去重，按做种数排序
         const seen = new Set()
         const deduped = []
         for (const row of merged) {
@@ -261,8 +256,25 @@ export default function Torrents({ movie }) {
     [rows, filter]
   )
 
-  // 未配置服务或全部站点不可达时静默隐藏
-  if (!ENABLED || status === 'error') return null
+  // 未配置下载服务或全部站点都不可达：显示区块 + 提示
+  if (!ENABLED) {
+    return (
+      <CollapsibleSection title="Downloads">
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
+          Downloads service is not configured.
+        </div>
+      </CollapsibleSection>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <CollapsibleSection title="Downloads">
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
+          All torrent sources are currently unavailable.
+        </div>
+      </CollapsibleSection>
+    )
+  }
 
   const headerAction = (
     <button
@@ -316,8 +328,7 @@ export default function Torrents({ movie }) {
           </div>
 
           <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
-            Magnet links open in your BitTorrent client. Only download content you have the
-            legal right to obtain.
+            For educational purposes only. Do not distribute or disseminate.
           </p>
         </>
       )}
