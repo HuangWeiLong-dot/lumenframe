@@ -49,7 +49,8 @@ jobs:
         run: |
           BASE_PATH="${{ vars.BASE_PATH }}"
           if [ -z "$BASE_PATH" ]; then
-            BASE_PATH="./"   # 相对路径：github.io/<repo>/ 与自定义域名根路径都能正确加载资源
+            BASE_PATH="/"   # Custom Domain（根路径部署）用绝对 / 最稳；
+                            # 若切回 github.io/<repo>/ 子路径，在仓库 Variables 里覆盖 BASE_PATH='./'
           fi
           echo "Using BASE_PATH=$BASE_PATH"
           BASE_PATH="$BASE_PATH" npm run build
