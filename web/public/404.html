@@ -4,22 +4,33 @@
     <meta charset="UTF-8" />
     <title>LUMENFRAME</title>
     <script>
-      // GitHub Pages 对未知路径（SPA 深链，如 /movie/123-dead-poets-society）
-      // 返回本页。把目标路径编码到 _spa 参数并跳到站点根（根路径下相对资源
-      // ./assets 才能正确解析）；index.html 的内联脚本会再把干净 URL 还原。
+      // GitHub Pages / Nginx 共用的 SPA 深链回退。
+      // 对任何无法在磁盘上找到的路径（/movie/...、/library、以及所有子路径），
+      // 都把完整路径编码到 _spa 查询参数里，然后跳回根路径。
+      // index.html 里的脚本会再把干净 URL 还原回来。
       ;(function () {
-        var p = window.location.pathname
-        var i = p.indexOf('/movie/')
-        var base = i >= 0 ? p.slice(0, i + 1) : '/'
-        var target = i >= 0 ? p.slice(i + 1) : ''
+        var p = window.location.pathname || '/'
         var qs = window.location.search.replace(/^\?/, '')
-        window.location.replace(
-          base +
-            '?_spa=' +
-            encodeURIComponent(target) +
-            (qs ? '&' + qs : '') +
-            window.location.hash
-        )
+        var hash = window.location.hash || ''
+        // _spa 里存的是**完整**原始路径，index.html 按原样还原
+        var target = p + (qs ? '?' + qs : '') + hash
+        // 跳到根，同时带上原始路径；根路径下相对资源 ./assets 才能正确解析
+        var rootPath = detectRoot(p)
+        window.location.replace(rootPath + '?_spa=' + encodeURIComponent(target))
+
+        // 从任意深链推导出项目根路径（兼容 GitHub Pages /repo/ 子路径、
+        // 自定义域名根路径 '/'、以及 hash 部署等）。
+        // 策略：遇到 movie/ /library /library/xxx /assets 等已知段就截断到它之前。
+        function detectRoot(path) {
+          var KNOWN = ['movie/', 'library', 'assets', 'api/', 'filmgrab', 'card-studio']
+          for (var i = 0; i < KNOWN.length; i++) {
+            var k = KNOWN[i]
+            var idx = path.indexOf('/' + k)
+            if (idx >= 0) return path.slice(0, idx + 1)
+          }
+          // 没匹配上任何已知段，保守返回最后一个 / 之前
+          return path.lastIndexOf('/') > 0 ? path.slice(0, path.lastIndexOf('/') + 1) : '/'
+        }
       })()
     </script>
   </head>
