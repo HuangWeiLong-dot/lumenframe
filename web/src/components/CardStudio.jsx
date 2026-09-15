@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Card, { TEMPLATE_LIST } from './Card'
+import CollapsibleSection from './CollapsibleSection'
 
 const TEMPLATES = TEMPLATE_LIST
 
@@ -43,6 +44,11 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
     bgColor: '#131313',
     showRatings: true,
     showRating: true,
+    showImdb: true,
+    showRt: true,
+    showPop: true,
+    showMeta: true,
+    showPersonal: true,
     showYear: true,
     showOverview: true,
     showDirector: true,
@@ -76,6 +82,16 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
   const previewW = Math.min(desiredW, slotW, slotH / ratio)
   const previewH = ratio * previewW
   const set = (patch) => setConfig((c) => ({ ...c, ...patch }))
+
+  // 可选择是否上卡的评分源；value 为 null 表示该评分当前不可用
+  const ratingSources = [
+    { key: 'showRating', label: 'TMDB', value: typeof movie.rating === 'number' ? movie.rating.toFixed(1) : null },
+    { key: 'showImdb', label: 'IMDb', value: ratings?.imdb != null ? ratings.imdb.toFixed(1) : null },
+    { key: 'showRt', label: 'Tomatometer', value: ratings?.rotten_tomatoes != null ? `${ratings.rotten_tomatoes}%` : null },
+    { key: 'showPop', label: 'Popcornmeter', value: ratings?.popcornmeter != null ? `${ratings.popcornmeter}%` : null },
+    { key: 'showMeta', label: 'Metascore', value: ratings?.metacritic != null ? String(ratings.metacritic) : null },
+    { key: 'showPersonal', label: 'My Score', value: personal > 0 ? String(personal) : null },
+  ]
 
   // 测量预览区可用宽度（RO：旋转屏/窗口缩放即时重算）
   useLayoutEffect(() => {
@@ -144,14 +160,19 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
     .join(' & ')
 
   return (
-    <section className="mt-10 flex flex-col border-t border-b border-zinc-300 py-6">
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-[0.3em] text-zinc-600">Card Studio</h3>
-        <button onClick={download} disabled={exporting} className={pill(true)}>
+    <CollapsibleSection
+      title="Card Studio"
+      defaultOpen
+      action={
+        <button
+          onClick={download}
+          disabled={exporting}
+          className={pill(true)}
+        >
           {exporting ? 'Rendering' : 'Download PNG'}
         </button>
-      </div>
-
+      }
+    >
       {/* 所有设备统一：海报吸顶在上，控件在下 */}
       <div className="flex flex-col">
       {/* 控件组 */}
@@ -228,6 +249,37 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
         </div>
       </div>
 
+      {config.showRatings && (
+        <div className="mt-3 flex flex-col gap-2">
+          <span className={label}>Rating sources</span>
+          <div className="grid grid-cols-3 gap-2">
+            {ratingSources.map((s) => {
+              const available = s.value != null
+              const active = available && config[s.key] !== false
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => available && set({ [s.key]: !active })}
+                  disabled={!available}
+                  className={`border px-2 py-1.5 text-center text-xs leading-tight transition ${
+                    active
+                      ? 'border-black bg-black text-white'
+                      : available
+                        ? 'border-zinc-300 bg-white text-zinc-600 hover:border-black'
+                        : 'cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-300'
+                  }`}
+                >
+                  {s.label}
+                  <span className={active ? 'ml-1 opacity-70' : 'ml-1 opacity-50'}>
+                    {s.value ?? '—'}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div
         className="mt-3 flex flex-col gap-2"
         onMouseLeave={() => setHoverRating(0)}
@@ -261,10 +313,8 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
       <div className="mt-4 text-xs text-zinc-600">
         {loadingText ? `Fetching ${loadingText}…` : ''}
         {ratings
-          ? ` IMDb ${ratings.imdb != null ? ratings.imdb.toFixed(1) : '—'} · Metascore ${
-              ratings.metacritic != null ? ratings.metacritic : '—'
-            }`
-          : ''}
+          ? `TMDB ${typeof movie.rating === 'number' ? movie.rating.toFixed(1) : '—'} · IMDb ${ratings.imdb != null ? ratings.imdb.toFixed(1) : '—'} · 🍅 ${ratings.rotten_tomatoes != null ? ratings.rotten_tomatoes + '%' : '—'} · 🍿 ${ratings.popcornmeter != null ? ratings.popcornmeter + '%' : '—'} · Metascore ${ratings.metacritic != null ? ratings.metacritic : '—'}`
+          : `TMDB ${typeof movie.rating === 'number' ? movie.rating.toFixed(1) : '—'}`}
       </div>
 
       {cardImage && (
@@ -335,6 +385,6 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           />
         </div>
       )}
-    </section>
+    </CollapsibleSection>
   )
 }

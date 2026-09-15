@@ -3,3 +3,6 @@ uvicorn>=0.27
 requests>=2.31
 beautifulsoup4>=4.12
 curl_cffi>=0.7
+# Torrent-Api-py 整合所需
+aiohttp>=3.9
+cloudscraper>=1.2.71

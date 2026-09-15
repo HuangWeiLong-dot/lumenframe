@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 // 可折叠结果区：整行标题可点击，右侧可放额外操作（如外链）。
 // count 以小圆徽展示结果数量；defaultOpen 控制初始展开。
+// 展开/折叠用 CSS grid 0fr→1fr 过渡，无需知道内容高度。
 export default function CollapsibleSection({ title, count, action, defaultOpen = false, children }) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -39,7 +40,14 @@ export default function CollapsibleSection({ title, count, action, defaultOpen =
         </button>
         {action}
       </div>
-      {open && <div className="mt-4">{children}</div>}
+      <div
+        className="grid transition-[grid-template-rows] duration-300 ease-out"
+        style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+      >
+        <div className="overflow-hidden">
+          <div className="mt-4">{children}</div>
+        </div>
+      </div>
     </section>
   )
 }

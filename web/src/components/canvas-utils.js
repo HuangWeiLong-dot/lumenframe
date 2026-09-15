@@ -108,22 +108,20 @@ export function drawText(ctx, text, x, y, maxWidth, opts = {}) {
     ctx.shadowOffsetY = shadow.offsetY || 0
   }
   if (letterSpacing) {
-    // Canvas 不直接支持 letterSpacing，逐字绘制
-    // 注意：空格不应用 letterSpacing，避免负间距导致词粘连
+    // Canvas 不直接支持 letterSpacing，逐字绘制。
+    // 关键：位置全部手动计算，必须强制左对齐——若沿用 center/right，
+    // 每个字会以定位点为中心绘制，整体左移半字宽，造成相邻字母重叠。
+    ctx.textAlign = 'left'
+    // 空格不应用 letterSpacing，避免负间距导致词粘连
     const charAdvance = (ch) => ctx.measureText(ch).width + (ch === ' ' ? 0 : letterSpacing)
     const { lines, lineHeight: lh } = wrapText(ctx, displayText, maxWidth, fontSize, lineHeight, effMaxLines, ellipsis)
     let cy = y
     for (const line of lines) {
+      let totalW = 0
+      for (const ch of line) totalW += charAdvance(ch)
       let cx = x
-      if (align === 'center') {
-        let totalW = 0
-        for (const ch of line) totalW += charAdvance(ch)
-        cx = x - totalW / 2
-      } else if (align === 'right') {
-        let totalW = 0
-        for (const ch of line) totalW += charAdvance(ch)
-        cx = x - totalW
-      }
+      if (align === 'center') cx = x - totalW / 2
+      else if (align === 'right') cx = x - totalW
       for (const ch of line) {
         ctx.fillText(ch, cx, cy)
         cx += charAdvance(ch)
@@ -182,6 +180,17 @@ export function mcColor(score) {
   if (score >= 61) return { bg: '#66CC33', fg: '#0C2A05' }
   if (score >= 40) return { bg: '#FFCC33', fg: '#332600' }
   return { bg: '#E8402D', fg: '#FFFFFF' }
+}
+
+// Rotten Tomatoes 颜色：≥60% 红（Fresh），<60% 暗绿（Rotten）
+export function rtColor(score) {
+  if (score >= 60) return { bg: '#FA320A', fg: '#FFFFFF' }
+  return { bg: '#4A6B2A', fg: '#FFFFFF' }
+}
+
+// Popcornmeter（RT 观众分）：用品牌色做文字/描边、白底，避免与 Tomatometer 红块混淆
+export function popcornColor(score) {
+  return score >= 60 ? '#D32013' : '#5B7A2E'
 }
 
 // 个人评分颜色分级：满分 10 金，7-9 绿，4-6 黄，0-3 红
@@ -260,30 +269,44 @@ export function drawRatings(ctx, x, y, maxWidth, data) {
   if (cfg.showRating && typeof movie.rating === 'number') {
     chips.push({ star: '★', value: movie.rating.toFixed(1), label: 'TMDB · /10', fg: onLight ? '#202023' : theme.ink, border: onLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)' })
   }
-  if (ratings?.imdb != null) chips.push({ value: ratings.imdb.toFixed(1), label: 'IMDb · /10', bg: '#F5C518', fg: '#1A1500' })
-  if (ratings?.metacritic != null) {
+  if (cfg.showImdb !== false && ratings?.imdb != null) chips.push({ value: ratings.imdb.toFixed(1), label: 'IMDb · /10', bg: '#F5C518', fg: '#1A1500' })
+  if (cfg.showRt !== false && ratings?.rotten_tomatoes != null) {
+    const c = rtColor(ratings.rotten_tomatoes)
+    chips.push({ value: `${ratings.rotten_tomatoes}%`, label: 'Tomatometer', bg: c.bg, fg: c.fg })
+  }
+  if (cfg.showPop !== false && ratings?.popcornmeter != null) {
+    const c = popcornColor(ratings.popcornmeter)
+    chips.push({ value: `${ratings.popcornmeter}%`, label: 'Popcornmeter', bg: '#FFFFFF', fg: c, border: c })
+  }
+  if (cfg.showMeta !== false && ratings?.metacritic != null) {
     const c = mcColor(ratings.metacritic)
     chips.push({ value: ratings.metacritic, label: 'Metascore · /100', bg: c.bg, fg: c.fg })
   }
-  if (personal > 0) {
+  if (cfg.showPersonal !== false && personal > 0) {
     const pc = personalColor(personal)
     chips.push({ star: '♥', value: personal, label: 'My score · /10', bg: pc.bg, fg: pc.fg })
   }
   if (chips.length === 0) return 0
 
   const gap = 10 * fs
-  // 测量总宽度用于居中
+  // 测量总宽度；超宽时整行等比缩小，绝不截断/丢弃徽章
   const widths = chips.map((c) => measureChip(ctx, c))
   const totalW = widths.reduce((a, b) => a + b, 0) + gap * (chips.length - 1)
-  let cx = align === 'center' ? x + (maxWidth - totalW) / 2 : x
+  const scale = Math.min(1, maxWidth / totalW)
+
+  ctx.save()
+  const originX = align === 'center' ? x + (maxWidth - totalW * scale) / 2 : x
+  ctx.translate(originX, y)
+  ctx.scale(scale, scale)
+  let cx = 0
   let maxH = 0
   for (let i = 0; i < chips.length; i++) {
-    const { w, h } = drawChip(ctx, cx, y, chips[i])
+    const { w, h } = drawChip(ctx, cx, 0, chips[i])
     cx += w + gap
     if (h > maxH) maxH = h
-    if (cx > x + maxWidth) break
   }
-  return maxH
+  ctx.restore()
+  return maxH * scale
 }
 
 // 简易深色判断

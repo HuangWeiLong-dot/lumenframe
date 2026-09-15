@@ -2,7 +2,7 @@
 import { forwardRef, useEffect, useRef } from 'react'
 import {
   fillRoundRect, drawText, drawImageCover,
-  linearGradient, drawRatings, isDark, mcColor, personalColor, wrapText,
+  linearGradient, drawRatings, isDark, mcColor, personalColor, rtColor, popcornColor, wrapText,
 } from './canvas-utils'
 import { posterUrl } from '../api'
 
@@ -387,48 +387,73 @@ function drawRatingsCard(ctx, p) {
   if (cfg.showRating && typeof movie.rating === 'number') {
     items.push({ value: movie.rating.toFixed(1), label: 'TMDB', color: '#FFFFFF', bg: 'rgba(255,255,255,0.14)', star: '★' })
   }
-  if (ratings?.imdb != null) {
+  if (cfg.showImdb !== false && ratings?.imdb != null) {
     items.push({ value: ratings.imdb.toFixed(1), label: 'IMDb', color: '#1A1500', bg: '#F5C518' })
   }
-  if (ratings?.metacritic != null) {
+  if (cfg.showRt !== false && ratings?.rotten_tomatoes != null) {
+    const c = rtColor(ratings.rotten_tomatoes)
+    items.push({ value: `${ratings.rotten_tomatoes}%`, label: 'Tomato', color: c.fg, bg: c.bg })
+  }
+  if (cfg.showPop !== false && ratings?.popcornmeter != null) {
+    // 观众分：白底深色数字 + 品牌色标签，与红色媒体分块区分
+    items.push({
+      value: `${ratings.popcornmeter}%`, label: 'Popcorn',
+      color: '#1A1500', bg: '#FFFFFF', labelColor: popcornColor(ratings.popcornmeter),
+    })
+  }
+  if (cfg.showMeta !== false && ratings?.metacritic != null) {
     const c = mcColor(ratings.metacritic)
     items.push({ value: String(ratings.metacritic), label: 'Metascore', color: c.fg, bg: c.bg })
   }
-  if (personal > 0) {
+  if (cfg.showPersonal !== false && personal > 0) {
     const pc = personalColor(personal)
     items.push({ value: String(personal), label: 'My Score', color: pc.fg, bg: pc.bg, star: '♥' })
   }
   if (items.length === 0) return
 
-  // 块尺寸（所有块统一）
-  const numSize = landscape ? 104 : 88
-  const labelSize = landscape ? 15 : 13
-  const bw = numSize * 1.85          // 块宽
-  const bh = numSize + labelSize * 2 + 28 // 块高
-  const gap = landscape ? 24 : 20
+  // ---- 响应式网格：按可用区域与评分项数自动选列数，块统一、不溢出、不重叠 ----
+  const n = items.length
+  const margin = Math.max(P * 1.2, W * 0.07)
+  const availW = W - margin * 2
+  const topReserve = H * 0.15   // 顶部留给片名
+  const bottomReserve = H * 0.11 // 底部留给年份
+  const availH = H - topReserve - bottomReserve
+  const gap = Math.round(Math.min(W, H) * 0.022)
+  const BLOCK_ASPECT = 1.55     // 评分块统一宽高比
+  // 评分群整体占计算网格区域的比例：缩小整体展示范围，让海报成为主体、评分为点缀
+  const GRID_SCALE = 0.5
 
-  // 计算布局
-  const singleRow = landscape || items.length <= 3
-  let cols, rows
-  if (singleRow) {
-    cols = items.length
-    rows = 1
-  } else {
-    cols = 2
-    rows = Math.ceil(items.length / 2)
+  // 枚举 1..n 列，选块面积最大（在不溢出前提下块最大）的方案
+  let best = null
+  for (let c = 1; c <= n; c++) {
+    const r = Math.ceil(n / c)
+    const cellW = (availW - (c - 1) * gap) / c
+    const cellH = (availH - (r - 1) * gap) / r
+    let bw = cellW
+    let bh = bw / BLOCK_ASPECT
+    if (bh > cellH) { bh = cellH; bw = bh * BLOCK_ASPECT }
+    const area = bw * bh
+    if (!best || area > best.area) best = { cols: c, rows: r, bw, bh, area }
   }
-  const gridW = cols * bw + (cols - 1) * gap
-  const gridH = rows * bh + (rows - 1) * gap
-  const startX = cx - gridW / 2
-  const startY = H / 2 - gridH / 2
+  // 列/行方案不变，仅整体等比缩小（块内字号按块高推导，自动跟随）
+  const cols = best.cols
+  const rows = best.rows
+  const bw = best.bw * GRID_SCALE
+  const bh = best.bh * GRID_SCALE
+  const gapS = gap * GRID_SCALE
 
-  // 绘制所有块
+  const gridH = rows * bh + (rows - 1) * gapS
+  const startY = topReserve + (availH - gridH) / 2
+
+  // 逐行水平居中（最后一行不足列数时同样居中）
   items.forEach((it, i) => {
     const r = Math.floor(i / cols)
-    const c = i % cols
-    const bx = startX + c * (bw + gap)
-    const by = startY + r * (bh + gap)
-    drawRatingBlock(ctx, bx, by, bw, bh, numSize, labelSize, it)
+    const colInRow = i - r * cols
+    const itemsInRow = Math.min(cols, n - r * cols)
+    const rowW = itemsInRow * bw + (itemsInRow - 1) * gapS
+    const bx = W / 2 - rowW / 2 + colInRow * (bw + gapS)
+    const by = startY + r * (bh + gapS)
+    drawRatingBlock(ctx, bx, by, bw, bh, it)
   })
 
   // 底部年份（与标题水平对齐：居中）
@@ -440,26 +465,49 @@ function drawRatingsCard(ctx, p) {
   }
 }
 
-// 单个评分块：左上角坐标 (x, y)，固定宽高 bw/bh
-function drawRatingBlock(ctx, x, y, bw, bh, numSize, labelSize, b) {
-  const r = 14
-  // 背景
-  fillRoundRect(ctx, x, y, bw, bh, r, b.bg)
-  // 数字（水平垂直居中偏上）
+// 单个评分块：尺寸自适应；数字按块宽自动缩字号，始终完整落在色块内
+function drawRatingBlock(ctx, x, y, bw, bh, b) {
+  fillRoundRect(ctx, x, y, bw, bh, bw * 0.12, b.bg)
+
+  const padX = bw * 0.12
+  const numCx = x + bw / 2
+
+  // 数字：从块高一半试起，超出块宽就逐级缩小
+  let numSize = bh * 0.5
   ctx.save()
-  ctx.font = `800 ${numSize}px sans-serif`
-  ctx.fillStyle = b.color
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  const numCx = x + bw / 2
-  const numCy = y + bh * 0.42
-  ctx.fillText(b.value, numCx, numCy)
+  ctx.fillStyle = b.color
+  do {
+    ctx.font = `800 ${numSize}px sans-serif`
+    if (ctx.measureText(b.value).width <= bw - padX * 2) break
+    numSize -= 2
+  } while (numSize > bh * 0.26)
+  ctx.fillText(b.value, numCx, y + bh * 0.39)
   ctx.restore()
-  // 标签（数字下方居中）
+
+  // 标签：数字下方居中，小号大写字 + 适度字距；含字距实测超宽则缩字号
   const labelText = b.star ? `${b.star} ${b.label}` : b.label
-  drawText(ctx, labelText, numCx, numCy + numSize * 0.55, bw - 24, {
-    fontSize: labelSize, color: b.color, fontFamily: 'sans-serif', fontWeight: 600,
-    align: 'center', opacity: 0.85, transform: 'uppercase',
+  const upper = String(labelText).toUpperCase()
+  let labelSize = Math.max(11, bh * 0.125)
+  const labelInnerW = bw - padX * 2
+  const labelFits = (size, tracking) => {
+    ctx.save()
+    ctx.font = `700 ${size}px sans-serif`
+    let w = 0
+    for (const ch of upper) w += ctx.measureText(ch).width + (ch === ' ' ? 0 : tracking)
+    ctx.restore()
+    return w <= labelInnerW
+  }
+  let labelTrack = labelSize * 0.12
+  while (labelSize > 11 && !labelFits(labelSize, labelTrack)) {
+    labelSize -= 1
+    labelTrack = labelSize * 0.12
+  }
+  drawText(ctx, labelText, numCx, y + bh * 0.74, labelInnerW, {
+    fontSize: labelSize, color: b.labelColor || b.color, fontFamily: 'sans-serif', fontWeight: 700,
+    align: 'center', opacity: 0.92, transform: 'uppercase', letterSpacing: labelTrack,
+    maxLines: 1, ellipsis: false,
   })
 }
 
@@ -491,7 +539,11 @@ function drawInfoCard(ctx, p) {
   const specsRows = buildSpecsRows(specs, cfg)
   const hasRatings = cfg.showRatings && (
     (cfg.showRating && typeof movie.rating === 'number') ||
-    ratings?.imdb != null || ratings?.metacritic != null || personal > 0
+    (cfg.showImdb !== false && ratings?.imdb != null) ||
+    (cfg.showRt !== false && ratings?.rotten_tomatoes != null) ||
+    (cfg.showPop !== false && ratings?.popcornmeter != null) ||
+    (cfg.showMeta !== false && ratings?.metacritic != null) ||
+    (cfg.showPersonal !== false && personal > 0)
   )
   const hasLists = creditsRows.length > 0 || specsRows.length > 0
 

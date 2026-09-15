@@ -131,6 +131,8 @@ app.get('/api/movie/:id', async (req, res) => {
       original_title: m.original_title,
       year: (m.release_date || '').slice(0, 4),
       rating: m.vote_average,
+      runtime: m.runtime || null,
+      genres: (m.genres || []).map((g) => g.name),
       overview: m.overview,
       poster_path: m.poster_path,
       imdb_id: m.imdb_id,
@@ -205,7 +207,7 @@ app.get('/api/trending', async (req, res) => {
   }
 })
 
-// 第三方评分：IMDb（cinemeta）+ Metacritic（JSON-LD），懒加载，成功后文件缓存
+// 第三方评分：OMDB API（IMDb / Rotten Tomatoes / Metacritic），懒加载，成功后文件缓存
 app.get('/api/ratings/:imdbId', async (req, res) => {
   const title = String(req.query.title || '').trim()
   const year = String(req.query.year || '').trim()
@@ -215,7 +217,87 @@ app.get('/api/ratings/:imdbId', async (req, res) => {
   try {
     const data = await getRatings(req.params.imdbId, title, year)
     res.set('x-cache', data.cache)
-    res.json({ imdb: data.imdb, metacritic: data.metacritic })
+    res.json({ imdb: data.imdb, metacritic: data.metacritic, rotten_tomatoes: data.rotten_tomatoes, popcornmeter: data.popcornmeter })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// 预告片：TMDB /movie/{id}/videos 返回官方预告片 YouTube key（无需 YouTube 搜索配额）
+app.get('/api/trailer/:tmdbId', async (req, res) => {
+  const id = req.params.tmdbId
+  if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tmdbId' })
+  try {
+    const data = await cached(`trailer:${id}`, () => tmdb(`/movie/${id}/videos`))
+    const vids = (data.results || []).filter((v) => v.site === 'YouTube' && v.official !== false)
+    // Trailer 优先于 Teaser；"Official Trailer" 标题优先；1080p 优先
+    const score = (v) =>
+      (v.type === 'Trailer' ? 100 : v.type === 'Teaser' ? 50 : 0) +
+      (/official\s*trailer/i.test(v.name) ? 30 : 0) +
+      (v.size === 1080 ? 10 : 0)
+    vids.sort((a, b) => score(b) - score(a))
+    const best = vids[0]
+    if (!best) return res.json({ videoId: null })
+    res.json({
+      videoId: best.key,
+      title: best.name,
+      official: best.official,
+      publishedAt: best.published_at || '',
+    })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// 流媒体可用性：Watchmode API（where to watch）
+const WATCHMODE_API = 'https://api.watchmode.com/v1'
+const WATCHMODE_KEY = process.env.WATCHMODE_API_KEY
+
+app.get('/api/watch/:tmdbId', async (req, res) => {
+  const id = req.params.tmdbId
+  if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tmdbId' })
+  if (!WATCHMODE_KEY) return res.json({ sources: [] })
+  try {
+    const result = await cached(`watch:${id}`, async () => {
+      // 1. 按 TMDB ID 搜 Watchmode title ID
+      const sRes = await fetch(
+        `${WATCHMODE_API}/search/?apiKey=${WATCHMODE_KEY}&search_field=tmdb_movie_id&search_value=${id}`
+      )
+      if (!sRes.ok) throw new Error(`watchmode search ${sRes.status}`)
+      const sData = await sRes.json()
+      const wmId = sData.title_results?.[0]?.id
+      if (!wmId) return { sources: [] }
+
+      // 2. 获取流媒体来源（1 次 API 调用拿所有类型/地区）
+      const srcRes = await fetch(
+        `${WATCHMODE_API}/title/${wmId}/sources/?apiKey=${WATCHMODE_KEY}`
+      )
+      if (!srcRes.ok) throw new Error(`watchmode sources ${srcRes.status}`)
+      const sources = await srcRes.json()
+
+      // 按平台去重（同一平台多个类型只保留最高优先级：sub > free > rent > buy > tve）
+      const typeRank = { sub: 0, free: 1, rent: 2, buy: 3, tve: 4 }
+      const byName = new Map()
+      for (const s of sources) {
+        const name = s.name
+        if (!byName.has(name) || typeRank[s.type] < typeRank[byName.get(name).type]) {
+          byName.set(name, s)
+        }
+      }
+      const deduped = [...byName.values()].sort((a, b) => typeRank[a.type] - typeRank[b.type])
+
+      return {
+        sources: deduped.map((s) => ({
+          name: s.name,
+          type: s.type,             // sub | free | rent | buy | tve
+          webUrl: s.web_url || null,
+          price: s.price != null ? s.price : null,
+          currency: s.currency || 'USD',
+          region: s.region || 'US',
+        })),
+      }
+    })
+    res.json(result)
   } catch (e) {
     res.status(502).json({ error: e.message })
   }

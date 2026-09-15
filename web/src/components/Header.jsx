@@ -7,9 +7,19 @@ const REFERENCES = [
   { name: 'Shot.Cafe', url: 'https://shot.cafe/' },
   { name: 'Filmvibes', url: 'https://filmvibes.io/' },
   { name: 'Flim', url: 'https://flim.ai/' },
+  { name: 'ShotDeck', url: 'https://shotdeck.com' },
 ]
 
-export default function Header({ onHome }) {
+const API_SOURCES = [
+  { name: 'TMDB API', url: 'https://developer.themoviedb.org/docs' },
+  { name: 'OMDB API', url: 'https://www.omdbapi.com/' },
+  { name: 'Watchmode API', url: 'https://api.watchmode.com/docs/' },
+  { name: 'YouTube Data API', url: 'https://developers.google.com/youtube/v3' },
+  { name: 'Torrent API', url: 'https://github.com/Ryuk-me/Torrent-Api-py' },
+  { name: 'ShotOnWhat?', url: 'https://shotonwhat.com' },
+]
+
+export default function Header({ onHome, onLibrary }) {
   const [open, setOpen] = useState(false)
 
   // 锁定背景滚动
@@ -23,19 +33,25 @@ export default function Header({ onHome }) {
   return (
     <>
       <header
-        className="fixed top-0 left-0 right-0 z-[1000] flex items-center justify-between px-6 py-4"
+        className="fixed top-0 left-0 right-0 z-[1000] flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4"
         style={{ fontFamily: "'Inter', Arial, sans-serif" }}
       >
         {/* 左侧 Logo */}
         <button
           onClick={onHome}
-          className="text-lg font-bold uppercase tracking-[0.15em] text-black transition hover:opacity-60"
+          className="text-base font-bold uppercase tracking-[0.12em] text-black transition hover:opacity-60 sm:text-lg sm:tracking-[0.15em]"
         >
           LUMENFRAME
         </button>
 
-        {/* 右侧：桌面 REFERENCES 按钮 + 移动端汉堡 */}
+        {/* 右侧：桌面 Library + References 按钮 + 移动端汉堡 */}
         <div className="flex items-center gap-3">
+          <button
+            onClick={onLibrary}
+            className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
+          >
+            Library
+          </button>
           <button
             onClick={() => setOpen(true)}
             className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
@@ -44,7 +60,7 @@ export default function Header({ onHome }) {
           </button>
           <button
             onClick={() => setOpen(true)}
-            aria-label="Open references"
+            aria-label="Open menu"
             className="flex h-8 w-8 items-center justify-center text-black transition hover:opacity-60 sm:hidden"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -84,7 +100,34 @@ export default function Header({ onHome }) {
             </svg>
           </button>
         </div>
-        <nav className="flex flex-col px-2 py-3">
+        <nav className="flex flex-col overflow-y-auto px-2 py-3" style={{ maxHeight: 'calc(100vh - 65px)' }}>
+          <button
+            onClick={() => { setOpen(false); onLibrary?.() }}
+            className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"
+          >
+            <span>My Library</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+              <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+            </svg>
+          </button>
+          <div className="mx-4 my-1 border-t border-zinc-100" />
+          <span className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.2em] text-zinc-400">API & Data Sources</span>
+          {API_SOURCES.map((r) => (
+            <a
+              key={r.url}
+              href={r.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between px-4 py-3 text-sm text-black transition hover:bg-zinc-100"
+            >
+              <span>{r.name}</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+                <path d="M7 17L17 7" />
+                <path d="M7 7h10v10" />
+              </svg>
+            </a>
+          ))}
+          <div className="mx-4 my-1 border-t border-zinc-100" />
           {REFERENCES.map((r) => (
             <a
               key={r.url}

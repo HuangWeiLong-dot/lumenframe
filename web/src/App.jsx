@@ -3,9 +3,14 @@ import CardStudio from './components/CardStudio'
 import CollapsibleSection from './components/CollapsibleSection'
 import MovieCollage from './components/MovieCollage'
 import FilmGrabShots from './components/FilmGrabShots'
+import TrailerSection from './components/TrailerSection'
+import WhereToWatch from './components/WhereToWatch'
+import Torrents from './components/Torrents'
 import Footer from './components/Footer'
 import Header from './components/Header'
+import LibraryPage from './components/LibraryPage'
 import { useTrending } from './hooks/useTrending'
+import { useLibrary } from './hooks/useLibrary'
 import { apiUrl, posterUrl, downloadImage } from './api'
 
 // ---- 极简 History API 路由 ----
@@ -42,6 +47,14 @@ function movieUrl(id, title) {
 function parseMovieRoute() {
   const m = window.location.pathname.match(/\/movie\/(\d+)(?:-.*)?\/?$/)
   return m ? Number(m[1]) : null
+}
+
+function libraryUrl() {
+  return `${BASE_PATH}library`
+}
+
+function parseLibraryRoute() {
+  return /\/library\/?$/.test(window.location.pathname)
 }
 
 
@@ -161,6 +174,27 @@ function PosterBackground() {
   )
 }
 
+// 添加到观影库的按钮
+function WatchButton({ active, onClick, label }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-xs font-medium uppercase tracking-[0.1em] transition ${
+        active
+          ? 'border-black bg-black text-white'
+          : 'border-zinc-300 text-zinc-700 hover:border-zinc-500 hover:bg-zinc-50'
+      }`}
+    >
+      {active && (
+        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
+      {label}
+    </button>
+  )
+}
+
 export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
@@ -170,6 +204,8 @@ export default function App() {
   const [movie, setMovie] = useState(null)
   // 首屏若是深链（/movie/...），直接进入加载态，避免首页闪一下
   const initialMovieIdRef = useRef(parseMovieRoute())
+  const initialLibraryRef = useRef(parseLibraryRoute())
+  const [view, setView] = useState(initialLibraryRef.current ? 'library' : 'home')
   const [detailLoading, setDetailLoading] = useState(initialMovieIdRef.current != null)
   const [specs, setSpecs] = useState(null)
   const [specsLoading, setSpecsLoading] = useState(false)
@@ -179,6 +215,7 @@ export default function App() {
   const [posters, setPosters] = useState([])
   const [imagesLoading, setImagesLoading] = useState(false)
   const [personal, setPersonal] = useState(0)
+  const [hoverRating, setHoverRating] = useState(0)
   // 从 Posters / Film Stills / Backdrops 中挑选、用于生成卡片的自定义图片（null = 官方主海报）
   const [cardImage, setCardImage] = useState(null)
   // Backdrops / Posters 灯箱当前图片
@@ -187,6 +224,8 @@ export default function App() {
   const searchBoxRef = useRef(null)
   // 每次打开电影自增；过期异步响应（旧电影晚到的 specs/ratings/images）一律丢弃
   const reqTokenRef = useRef(0)
+  // 本地观影库（watched / watch later）
+  const lib = useLibrary()
   // 当前电影页能否用浏览器后退：应用内点选进来为 true（回到上一页）；
   // 深链直接打开为 false（Back 按钮改走回主页）
   const canBackRef = useRef(false)
@@ -284,10 +323,10 @@ export default function App() {
       const url = apiUrl(`/api/ratings/${m.imdb_id}?title=${encodeURIComponent(m.title)}&year=${m.year}`)
       const res = await fetch(url)
       if (token !== reqTokenRef.current) return
-      setRatings(res.ok ? await res.json() : { imdb: null, metacritic: null })
+      setRatings(res.ok ? await res.json() : { imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null })
     } catch {
       if (token !== reqTokenRef.current) return
-      setRatings({ imdb: null, metacritic: null })
+      setRatings({ imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null })
     } finally {
       if (token === reqTokenRef.current) setRatingsLoading(false)
     }
@@ -314,10 +353,22 @@ export default function App() {
     }
   }
 
-  // 个人评分仅保存在本机浏览器，按 TMDB id 区分
+  // 个人评分仅保存在本机浏览器，按 TMDB id 区分；同时同步到观影库
   function changePersonal(v) {
     setPersonal(v)
-    if (movie) localStorage.setItem(`lumenframe:myrating:${movie.id}`, String(v))
+    if (movie) {
+      localStorage.setItem(`lumenframe:myrating:${movie.id}`, String(v))
+      lib.updateMyRating(movie.id, v)
+    }
+  }
+
+  // 打分：设置评分，若不在 watched 则自动加入 watched
+  function handleRate(n) {
+    const v = personal === n ? 0 : n
+    changePersonal(v)
+    if (v > 0 && movie && !lib.isInWatched(movie.id)) {
+      lib.addToWatched(movie, v)
+    }
   }
 
   // 清空当前电影的全部视图状态（回主页 / 前进后退到主页时复用）
@@ -337,6 +388,7 @@ export default function App() {
   async function openMovie(id, { history = 'push', scroll = true } = {}) {
     // 新请求使所有在途旧请求失效，杜绝快速切换时旧电影数据串到新电影页面
     const token = ++reqTokenRef.current
+    setView('movie')
     setDetailLoading(true)
     setError('')
     setDropdownOpen(false)
@@ -378,9 +430,19 @@ export default function App() {
   function goHome() {
     reqTokenRef.current++
     resetMovieView()
+    setView('home')
     if (window.location.pathname !== BASE_PATH) {
       window.history.pushState({ home: true }, '', BASE_PATH)
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // 打开观影库
+  function goLibrary() {
+    reqTokenRef.current++
+    resetMovieView()
+    setView('library')
+    window.history.pushState({ library: true }, '', libraryUrl())
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -396,13 +458,18 @@ export default function App() {
   useEffect(() => {
     const onPop = () => {
       const id = parseMovieRoute()
-      // 后退/前进到电影页时仍可继续后退；落到主页则 Back 应回主页
+      // 后退/前进到电影页时仍可继续后退；落到主页/库页则 Back 应回主页
       canBackRef.current = id != null
       if (id != null) {
         openMovie(id, { history: 'none', scroll: false })
+      } else if (parseLibraryRoute()) {
+        reqTokenRef.current++
+        resetMovieView()
+        setView('library')
       } else {
         reqTokenRef.current++
         resetMovieView()
+        setView('home')
       }
     }
     window.addEventListener('popstate', onPop)
@@ -413,11 +480,22 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <PosterBackground />
-      <Header onHome={goHome} />
-      {/* 首页（搜索 + Trending）通栏铺满，移动端仅留小边距；详情页保持 1024 居中阅读宽度 */}
+      <Header onHome={goHome} onLibrary={goLibrary} />
+
+      {view === 'library' ? (
+        <main
+          className="mx-auto flex w-full flex-1 flex-col pt-24"
+          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
+        >
+          <LibraryPage
+            onOpenMovie={(id) => openMovie(id)}
+            onGoHome={goHome}
+          />
+        </main>
+      ) : (
       <main
-        className={`mx-auto flex w-full flex-1 flex-col pt-24 ${
-          movie ? 'max-w-5xl px-6' : 'px-4 sm:px-8 lg:px-12'
+        className={`mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24 ${
+          movie ? 'max-w-5xl px-4 sm:px-6' : 'px-4 sm:px-8 lg:px-12'
         }`}
         style={{ fontFamily: "'Inter', Arial, sans-serif" }}
       >
@@ -537,15 +615,94 @@ export default function App() {
             </div>
           )}
           <div className="min-w-0 w-full flex-1 text-center sm:text-left">
-            <h2 className="text-2xl font-bold leading-tight">{movie.title}</h2>
+            <h2 className="text-xl font-bold leading-tight sm:text-2xl">{movie.title}</h2>
             {movie.original_title !== movie.title && (
               <p className="mt-1 truncate text-sm text-zinc-600">{movie.original_title}</p>
             )}
-            <p className="mt-3 text-sm text-zinc-700">
-              {movie.year} · TMDB {movie.rating.toFixed(1)}
-              {ratings?.imdb != null && ` · IMDb ${ratings.imdb.toFixed(1)}`}
-              {ratings?.metacritic != null && ` · Metascore ${ratings.metacritic}`}
-            </p>
+            {/* 信息行：时长优先展示，评分依次；移动端居中换行，桌面端左对齐 */}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-zinc-700 sm:justify-start sm:text-sm">
+              <span>{movie.year}</span>
+              {movie.runtime > 0 && (
+                <>
+                  <span className="text-zinc-300">·</span>
+                  <span>{Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m</span>
+                </>
+              )}
+              <span className="text-zinc-300">·</span>
+              <span>TMDB {movie.rating.toFixed(1)}</span>
+              {ratings?.imdb != null && (
+                <>
+                  <span className="text-zinc-300">·</span>
+                  <span>IMDb {ratings.imdb.toFixed(1)}</span>
+                </>
+              )}
+              {ratings?.rotten_tomatoes != null && (
+                <>
+                  <span className="text-zinc-300">·</span>
+                  <span>🍅 {ratings.rotten_tomatoes}%</span>
+                </>
+              )}
+              {ratings?.popcornmeter != null && (
+                <>
+                  <span className="text-zinc-300">·</span>
+                  <span>🍿 {ratings.popcornmeter}%</span>
+                </>
+              )}
+              {ratings?.metacritic != null && (
+                <>
+                  <span className="text-zinc-300">·</span>
+                  <span>Metascore {ratings.metacritic}</span>
+                </>
+              )}
+            </div>
+            {/* 打分 + Watched / Watch Later：移动端居中堆叠，桌面端同行左对齐 */}
+            <div className="mt-3 flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-4 sm:justify-start">
+              <div className="flex flex-wrap items-center justify-center gap-0.5 sm:gap-1">
+                <span className="text-[11px] text-zinc-600 sm:text-xs">My score</span>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => handleRate(n)}
+                    onMouseEnter={() => setHoverRating(n)}
+                    onMouseLeave={() => setHoverRating(0)}
+                    aria-label={`rate ${n}`}
+                    className={`text-xs leading-none transition sm:text-sm ${
+                      n <= (hoverRating || personal) ? 'text-amber-500' : 'text-zinc-300 hover:text-zinc-400'
+                    }`}
+                  >
+                    ★
+                  </button>
+                ))}
+                {personal > 0 && (
+                  <button
+                    onClick={() => changePersonal(0)}
+                    className="ml-1 text-[11px] text-zinc-500 underline hover:text-zinc-700 sm:text-xs"
+                  >
+                    clear
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <WatchButton
+                  active={lib.isInWatched(movie.id)}
+                  onClick={() =>
+                    lib.isInWatched(movie.id)
+                      ? lib.removeFromWatched(movie.id)
+                      : lib.addToWatched(movie, personal)
+                  }
+                  label="Watched"
+                />
+                <WatchButton
+                  active={lib.isInWatchLater(movie.id)}
+                  onClick={() =>
+                    lib.isInWatchLater(movie.id)
+                      ? lib.removeFromWatchLater(movie.id)
+                      : lib.addToWatchLater(movie)
+                  }
+                  label="Watch Later"
+                />
+              </div>
+            </div>
             {movie.credits?.director && (
               <p className="mt-2 text-sm text-zinc-700">Director · {movie.credits.director}</p>
             )}
@@ -764,6 +921,18 @@ export default function App() {
       )}
 
       {movie && !detailLoading && (
+        <TrailerSection key={`trailer-${movie.id}`} movie={movie} />
+      )}
+
+      {movie && !detailLoading && (
+        <WhereToWatch key={`watch-${movie.id}`} movie={movie} />
+      )}
+
+      {movie && !detailLoading && (
+        <Torrents key={`torrents-${movie.id}`} movie={movie} />
+      )}
+
+      {movie && !detailLoading && (
         <FilmGrabShots
           key={movie.id}
           movie={movie}
@@ -787,6 +956,7 @@ export default function App() {
       )}
 
     </main>
+      )}
       <Footer />
     </div>
   )
