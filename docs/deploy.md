@@ -1,4 +1,4 @@
-# LUMENFRAME 部署手册
+﻿# LUMENFRAME 部署手册
 
 本文档介绍 LUMENFRAME（电影卡片生成器）在服务器上的完整部署方式。
 本地开发启动方式见 [manual.md](./manual.md)；FilmGrab 截图服务的接口与实现细节见
@@ -10,22 +10,22 @@
 
 | 服务 | 技术栈 | 默认端口 | 职责 |
 | --- | --- | --- | --- |
-| `server/` | Node.js + Express | 3001 | TMDB 数据代理、图片代理、第三方评分（IMDb/Metacritic）、技术参数（ShotOnWhat?） |
+| `server/` | Node.js + Express | 3002 | TMDB 数据代理、图片代理、第三方评分（IMDb/Metacritic）、技术参数（ShotOnWhat?） |
 | `web/` | React 19 + Vite | 开发态 5173 | 前端；生产环境构建为 `web/dist/` 纯静态文件 |
 | `filmgrab-service/` | Python + FastAPI | 8000 | FilmGrab 高清剧照抓取与图片代理 |
 
 开发环境下由 Vite 做开发代理（见 `web/vite.config.js`）：
 
-- `/api/*` → `http://localhost:3001`
+- `/api/*` → `http://localhost:3002`
 - `/filmgrab/*` → `http://localhost:8000/api/*`（前缀重写）
 
 生产环境没有 Vite，这三条路由改由 Nginx（或任意反向代理）承担，最终用户只访问
-80/443 一个端口，3001 与 8000 只监听 `127.0.0.1`，不对外暴露。
+80/443 一个端口，3002 与 8000 只监听 `127.0.0.1`，不对外暴露。
 
 ```text
 浏览器 ──HTTP(S)──> Nginx :80/:443
                      ├── /            -> web/dist 静态文件
-                     ├── /api/        -> Node   127.0.0.1:3001
+                     ├── /api/        -> Node   127.0.0.1:3002
                      └── /filmgrab/   -> Python 127.0.0.1:8000/api/
 ```
 
@@ -54,8 +54,8 @@ TMDB_API_KEY=your_tmdb_v3_api_key
 # 可选：访问 TMDB 需要的 HTTP 代理（仅受限网络填写；海外服务器留空即直连）
 TMDB_PROXY=http://127.0.0.1:7890
 
-# 可选：监听端口，默认 3001
-PORT=3001
+# 可选：监听端口，默认 3002
+PORT=3002
 ```
 
 `.env` 已在 `.gitignore` 中，不要提交到仓库。
@@ -177,9 +177,9 @@ server {
     root /opt/lumenframe/web/dist;
     index index.html;
 
-    # Node 后端：/api/* 原样转发到 3001
+    # Node 后端：/api/* 原样转发到 3002
     location /api/ {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -220,7 +220,7 @@ certbot 定时器自动处理。
 
 ```bash
 # Node 后端（应返回 JSON 海报列表）
-curl -s http://127.0.0.1:3001/api/trending | head -c 200
+curl -s http://127.0.0.1:3002/api/trending | head -c 200
 
 # Python 服务（应返回 {"service":"filmgrab-proxy",...}）
 curl -s http://127.0.0.1:8000/
@@ -246,7 +246,7 @@ curl -s -o /dev/null -w "%{http_code}\n" "https://example.com/filmgrab/screensho
             │  VITE_API_BASE / VITE_FILMGRAB_BASE 构建期注入
             ▼
          https://api.example.com  (Nginx + Let's Encrypt)
-            ├── /api/      -> Node   127.0.0.1:3001
+            ├── /api/      -> Node   127.0.0.1:3002
             └── /filmgrab/ -> Python 127.0.0.1:8000/api/
 ```
 
@@ -259,8 +259,8 @@ curl -s -o /dev/null -w "%{http_code}\n" "https://example.com/filmgrab/screensho
 `TMDB_API_KEY`；服务器在国内则同时设置 `TMDB_PROXY` 与 Python 服务的
 `HTTP_PROXY`/`HTTPS_PROXY`）。区别只有两点：
 
-- 两个服务都只监听 `127.0.0.1`（systemd 示例中 Node 默认监听 3001 即只本机访问；
-  确认没有把 3001/8000 加入防火墙放行）。
+- 两个服务都只监听 `127.0.0.1`（systemd 示例中 Node 默认监听 3002 即只本机访问；
+  确认没有把 3002/8000 加入防火墙放行）。
 - 不需要在服务器上构建/托管 `web/dist`，Nginx 只做 API 反代。
 
 ### 5.2 Nginx：仅 API 的站点配置
@@ -275,7 +275,7 @@ server {
 
     # Node 后端
     location /api/ {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -458,8 +458,8 @@ cd web; npm run build
    注册为 Windows 服务，注意它应只在内网监听。
 3. Nginx：使用与 4.3 相同的 server 配置，`root` 指向
    `C:/lumenframe/web/dist`（路径用正斜杠），两条 `proxy_pass` 地址改为
-   `http://127.0.0.1:3001` 与 `http://127.0.0.1:8000`。
-4. Windows 防火墙只放行 80/443，不要放行 3001/8000。
+   `http://127.0.0.1:3002` 与 `http://127.0.0.1:8000`。
+4. Windows 防火墙只放行 80/443，不要放行 3002/8000。
 
 ## 8. 缓存策略与更新发布
 

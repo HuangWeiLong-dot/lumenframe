@@ -3,3 +3,4 @@ dist/
 .env
 tmdb_test.json
 server/.cache/
+docs/

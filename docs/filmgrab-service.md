@@ -1,4 +1,4 @@
-# FilmGrab 截图代理服务
+﻿# FilmGrab 截图代理服务
 
 一个独立运行的 Python（FastAPI）后端服务：输入电影名，从 [FilmGrab](https://film-grab.com)
 抓取该电影的高清截图列表，并以**服务端代理**方式转发图片。前端不直接访问 FilmGrab，

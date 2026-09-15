@@ -1,4 +1,4 @@
-# LUMENFRAME API Reference
+﻿# LUMENFRAME API Reference
 
 This document describes every API endpoint exposed by the LUMENFRAME backend.
 
@@ -6,20 +6,20 @@ The system has two backend services:
 
 | Service | Stack | Default Port | Internal Prefix |
 | --- | --- | --- | --- |
-| `server/` | Node.js + Express | 3001 | `/api` |
+| `server/` | Node.js + Express | 3002 | `/api` |
 | `filmgrab-service/` | Python + FastAPI | 8000 | `/api` (internal), exposed as `/filmgrab` externally |
 
 In local development, Vite proxies both services:
 
 ```text
-/api/*      →  http://localhost:3001        (Node backend)
+/api/*      →  http://localhost:3002        (Node backend)
 /filmgrab/* →  http://localhost:8000/api/*  (Python backend, prefix rewritten)
 ```
 
 In production, Nginx replaces Vite for the same routing:
 
 ```text
-/api/       →  127.0.0.1:3001
+/api/       →  127.0.0.1:3002
 /filmgrab/  →  127.0.0.1:8000/api/
 ```
 
@@ -27,7 +27,7 @@ All endpoints are read-only `GET` and return JSON unless noted otherwise (image 
 
 ---
 
-## Part A — Node.js Backend (port 3001)
+## Part A — Node.js Backend (port 3002)
 
 ### Health & Search
 
@@ -671,7 +671,7 @@ Fetch torrent data from a specific detail-page URL (currently only 1337x).
 | --- | --- | --- | --- |
 | `TMDB_API_KEY` | Yes | — | TMDB v3 API key |
 | `TMDB_PROXY` | No | — | Proxy URL for TMDB access (e.g. `http://127.0.0.1:7890`) |
-| `PORT` | No | 3001 | Server port |
+| `PORT` | No | 3002 | Server port |
 | `OMDB_API_KEY` | No | — | OMDB API key for ratings |
 | `WATCHMODE_API_KEY` | No | — | Watchmode API key for streaming availability |
 

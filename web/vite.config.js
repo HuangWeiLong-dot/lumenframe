@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       // 前端开发时把 /api 转发到 Node 后端（TMDB 数据）
-      '/api': 'http://localhost:3001',
+      '/api': 'http://localhost:3002',
       // FilmGrab 截图服务（Python FastAPI，8000）：/filmgrab/* -> :8000/api/*
       '/filmgrab': {
         target: 'http://localhost:8000',

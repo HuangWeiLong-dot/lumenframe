@@ -1,10 +1,10 @@
-# LUMENFRAME 启动手册（本地开发）
+﻿# LUMENFRAME 启动手册（本地开发）
 
 在项目根目录 `lumenframe/` 下分别启动以下三个服务（各开一个终端）。
 生产环境部署请见 [deploy.md](./deploy.md)；FilmGrab 服务的接口细节见
 [filmgrab-service.md](./filmgrab-service.md)。
 
-## 1. Node 后端（TMDB 数据，端口 3001）
+## 1. Node 后端（TMDB 数据，端口 3002）
 
 ```bash
 npm run dev --prefix server

@@ -6,7 +6,7 @@ import { getRatings } from './ratings.js'
 const TMDB_API = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
 const API_KEY = process.env.TMDB_API_KEY
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT || 3002
 
 // 国内网络需要代理访问 TMDB；部署到海外服务器时 TMDB_PROXY 留空即直连
 if (process.env.TMDB_PROXY) {

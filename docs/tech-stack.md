@@ -1,4 +1,4 @@
-# LUMENFRAME Tech Stack
+﻿# LUMENFRAME Tech Stack
 
 This document describes the technology stack, data acquisition pipeline, and API usage patterns of LUMENFRAME — a movie card generator that aggregates metadata, ratings, trailers, screenshots, streaming availability, and torrent resources into a single detail page.
 
@@ -20,7 +20,7 @@ For the full endpoint reference, see [api-reference.md](./api-reference.md).
          └────────┬──────────┬────┘
                   │          │
      /api/*       │          │  /filmgrab/*
-     (port 3001)  │          │  (port 8000 → /api/)
+     (port 3002)  │          │  (port 8000 → /api/)
                   ▼          ▼
          ┌──────────────┐  ┌───────────────────────┐
          │ Node.js +    │  │ Python + FastAPI      │
@@ -47,7 +47,7 @@ For the full endpoint reference, see [api-reference.md](./api-reference.md).
 | Service | Stack | Port | Responsibilities |
 | --- | --- | --- | --- |
 | `web/` | React 19 + Vite 7 + Tailwind CSS v4 | 5173 (dev) / static (prod) | Frontend SPA; movie search, detail page, card studio |
-| `server/` | Node.js + Express + undici | 3001 | TMDB data proxy, image proxy, ratings, tech specs, watch availability |
+| `server/` | Node.js + Express + undici | 3002 | TMDB data proxy, image proxy, ratings, tech specs, watch availability |
 | `filmgrab-service/` | Python 3.8+ + FastAPI + uvicorn | 8000 | FilmGrab screenshots, YouTube trailers/comments, torrent search |
 
 ### Frontend Stack
@@ -294,7 +294,7 @@ export const posterUrl = (path, size = 'w500') =>
 // web/vite.config.js
 server: {
   proxy: {
-    '/api': 'http://localhost:3001',           // Node backend
+    '/api': 'http://localhost:3002',           // Node backend
     '/filmgrab': {                              // Python backend
       target: 'http://localhost:8000',
       changeOrigin: true,
@@ -403,7 +403,7 @@ All section components follow these conventions:
 ```text
 Browser (5173)
   └─ Vite proxy
-       ├─ /api/ → Node (3001) → TMDB via undici ProxyAgent (127.0.0.1:7890)
+       ├─ /api/ → Node (3002) → TMDB via undici ProxyAgent (127.0.0.1:7890)
        └─ /filmgrab/ → Python (8000) → upstream via HTTP_PROXY env (127.0.0.1:7890)
 ```
 
@@ -412,7 +412,7 @@ Browser (5173)
 ```text
 Browser → Nginx (80/443)
   ├─ / → web/dist (static files)
-  ├─ /api/ → Node (127.0.0.1:3001) → TMDB direct (no proxy needed)
+  ├─ /api/ → Node (127.0.0.1:3002) → TMDB direct (no proxy needed)
   └─ /filmgrab/ → Python (127.0.0.1:8000)/api/ → upstream direct
 ```
 
