@@ -8,6 +8,7 @@ import { getRatings } from './ratings.js'
 import { tastediveSimilar } from './tastedive.js'
 import { titleScore, normalizeTitle } from './titlematch.js'
 import { searchShows, getShow, getEpisodes, parseTvImageUrl, fetchTvImage } from './tvmaze.js'
+import { searchSubtitles, downloadSubtitle } from './subtitles.js'
 
 const TMDB_API = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
@@ -1033,6 +1034,33 @@ app.get('/api/tv/:id(\\d+)/episodes', async (req, res) => {
   try {
     const episodes = await cached(`tveps:${req.params.id}`, () => getEpisodes(Number(req.params.id)))
     res.json({ episodes })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// 字幕搜索
+app.get('/api/subtitles', async (req, res) => {
+  try {
+    const { imdb_id, season, episode, lang } = req.query
+    if (!imdb_id) return res.status(400).json({ error: 'imdb_id required' })
+    const rawImdb = imdb_id.replace(/^tt/, '')
+    const results = await searchSubtitles(rawImdb, season, episode, lang || 'eng')
+    res.json({ results })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// 字幕下载（gunzip → 纯 SRT 文本）
+app.get('/api/subtitle/download', async (req, res) => {
+  try {
+    const { url } = req.query
+    if (!url) return res.status(400).json({ error: 'url required' })
+    const text = await downloadSubtitle(url)
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="subtitle.srt"')
+    res.send(text)
   } catch (e) {
     res.status(502).json({ error: e.message })
   }
