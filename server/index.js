@@ -124,7 +124,10 @@ app.get('/api/search', async (req, res) => {
       cached(`search:movie:${q}`, () =>
         tmdb('/search/movie', { query: q, include_adult: false })
       ),
-      cached(`search:tv:${q}`, () => searchShows(q)).catch(() => []),
+      cached(`search:tv:${q}`, () => searchShows(q)).catch((e) => {
+        console.error('[search] TVmaze search failed:', e.message)
+        return []
+      }),
     ])
     const movies = (tmdbRes.results || []).map((m) => ({
       kind: 'movie',

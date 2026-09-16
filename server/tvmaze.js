@@ -1,15 +1,16 @@
 // TVmaze（剧集元数据，免费、无需 API key）
 // 文档：https://api.tvmaze.com ；官方要求请求带可识别的 User-Agent。
-// 默认直连（国内可访问）；需要时可用 TVMAZE_PROXY 覆盖。
-import { Agent, ProxyAgent } from 'undici'
+// 使用 undici 的 fetch + dispatcher，确保代理选项在所有 Node 版本下生效。
+import { fetch, Agent, ProxyAgent } from 'undici'
 
 const BASE = 'https://api.tvmaze.com'
 const IMG_HOST = 'static.tvmaze.com'
 const UA = 'Lumenframe/1.0 (movie & tv metadata app; https://github.com/lumenframe)'
 
+// 海外服务器直连；国内可设 TVMAZE_PROXY=http://127.0.0.1:7890
 const dispatcher = process.env.TVMAZE_PROXY
   ? new ProxyAgent(process.env.TVMAZE_PROXY)
-  : new Agent()
+  : new Agent({ connectTimeout: 10000, headersTimeout: 10000 })
 
 async function tvmaze(pathname) {
   const r = await fetch(BASE + pathname, {
