@@ -1,4 +1,7 @@
 import express from 'express'
+import { setDefaultResultOrder } from 'dns'
+// 强制 IPv4 优先：部分云服务器无 IPv6 路由，Node.js fetch 默认尝试 IPv6 会 "fetch failed"
+setDefaultResultOrder('ipv4first')
 import { ProxyAgent, setGlobalDispatcher } from 'undici'
 import { getSpecs } from './sow.js'
 import { getRatings } from './ratings.js'
