@@ -28,6 +28,26 @@ import { genreIdByName } from './genres'
 // 演职员：{BASE}person/{tmdbPersonId}-{slug}
 // id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省
 
+// 服务器 SPA 重定向修复：部分 nginx/CDN 用 _spa= 参数重定向而非 try_files，
+// 刷新 /tv/541-prison-break → /tv/?_spa=/tv/541-prison-break，
+// 递归解码后 replaceState 回正确路径，避免 URL 无限嵌套
+function resolveSpaRedirect() {
+  const params = new URLSearchParams(window.location.search)
+  let spa = params.get('_spa')
+  if (!spa) return
+  // 递归解包 _spa= 参数（最多 20 层）
+  let path = spa
+  for (let i = 0; i < 20; i++) {
+    const m = path.match(/_spa=([^&]+)/)
+    if (!m) break
+    path = decodeURIComponent(m[1])
+  }
+  // 确保是绝对路径
+  if (!path.startsWith('/')) path = '/' + path
+  window.history.replaceState(null, '', path)
+}
+resolveSpaRedirect()
+
 // 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
 // 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
 function getBasePath() {

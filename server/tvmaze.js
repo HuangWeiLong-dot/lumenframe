@@ -3,11 +3,12 @@
 // 与 curl 使用相同的系统网络栈，连通性一致
 import https from 'node:https'
 
-const BASE = 'api.tvmaze.com'
+const BASE_HOST = 'api.tvmaze.com'
 const IMG_HOST = 'static.tvmaze.com'
 const UA = 'Lumenframe/1.0 (movie & tv metadata app; https://github.com/lumenframe)'
 
-function httpsGet(pathname, host = BASE) {
+// 返回 Buffer（图片）或 string→JSON（API）
+function httpsGet(pathname, host = BASE_HOST) {
   return new Promise((resolve, reject) => {
     const req = https.get({
       host,
@@ -20,12 +21,13 @@ function httpsGet(pathname, host = BASE) {
       const chunks = []
       res.on('data', (c) => chunks.push(c))
       res.on('end', () => {
-        const body = Buffer.concat(chunks).toString()
+        const buf = Buffer.concat(chunks)
         resolve({
           status: res.statusCode,
           ok: res.statusCode >= 200 && res.statusCode < 300,
-          body,
-          json: () => JSON.parse(body),
+          buf,
+          json: () => JSON.parse(buf.toString('utf8')),
+          text: () => buf.toString('utf8'),
           headers: res.headers,
         })
       })
@@ -182,7 +184,7 @@ export async function fetchTvImage(u) {
   const r = await httpsGet(url.pathname + url.search, url.host)
   if (!r.ok) throw new Error(`tvmaze image ${r.status}`)
   return {
-    buf: Buffer.from(r.body, 'binary'),
+    buf: r.buf, // 原始 Buffer，不做 string 转换
     contentType: r.headers['content-type'] || 'image/jpeg',
   }
 }
