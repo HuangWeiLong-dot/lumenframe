@@ -20,6 +20,28 @@ export const apiUrl = (path) => `${API_BASE}${path}`
 export const posterUrl = (path, size = 'w500') =>
   apiUrl(`/api/image?path=${encodeURIComponent(path)}&s=${size}`)
 
+// TVmaze 图片（static.tvmaze.com 原始 URL）走后端代理，规避跨域
+export const tvImageUrl = (u) =>
+  u ? apiUrl(`/api/tv/image?u=${encodeURIComponent(u)}`) : null
+
+// 统一海报地址：优先用本 kind 的海报源，缺失时 fallback 到另一个 API 补的海报
+// （后端混合搜索会把同名条目的海报互相补齐，这里确保两种字段都能渲染）
+export const posterFor = (item, size = 'w500') => {
+  if (!item) return null
+  if (item.kind === 'tv') {
+    return item.tvPoster
+      ? tvImageUrl(item.tvPoster)
+      : item.poster_path
+        ? posterUrl(item.poster_path, size)
+        : null
+  }
+  return item.poster_path
+    ? posterUrl(item.poster_path, size)
+    : item.tvPoster
+      ? tvImageUrl(item.tvPoster)
+      : null
+}
+
 // 下载图片：fetch blob → 触发浏览器下载（跨域需后端 CORS 允许）
 export async function downloadImage(url, filename) {
   const res = await fetch(url)

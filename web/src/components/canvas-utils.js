@@ -267,7 +267,7 @@ export function drawRatings(ctx, x, y, maxWidth, data) {
   if (!cfg.showRatings) return 0
   const chips = []
   if (cfg.showRating && typeof movie.rating === 'number') {
-    chips.push({ star: '★', value: movie.rating.toFixed(1), label: 'TMDB · /10', fg: onLight ? '#202023' : theme.ink, border: onLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)' })
+    chips.push({ star: '★', value: movie.rating.toFixed(1), label: movie.ratingSource === 'TVmaze' ? 'TVmaze · /10' : 'TMDB · /10', fg: onLight ? '#202023' : theme.ink, border: onLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)' })
   }
   if (cfg.showImdb !== false && ratings?.imdb != null) chips.push({ value: ratings.imdb.toFixed(1), label: 'IMDb · /10', bg: '#F5C518', fg: '#1A1500' })
   if (cfg.showRt !== false && ratings?.rotten_tomatoes != null) {

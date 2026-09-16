@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { posterUrl } from '../api'
+import { posterFor } from '../api'
 import { useLibrary } from '../hooks/useLibrary'
 import LibraryStats from './LibraryStats'
+import SmartImage from './SmartImage'
 
 function formatRuntime(min) {
   if (!min) return ''
@@ -10,28 +11,30 @@ function formatRuntime(min) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-function MovieCard({ item, list, onOpen, onRemove }) {
+function TitleCard({ item, list, onOpen, onRemove }) {
+  const isTv = item.kind === 'tv'
+  const poster = posterFor(item, 'w185')
   return (
     <div className="group flex gap-3 border border-zinc-200 p-3 transition hover:border-zinc-400">
-      {item.poster_path ? (
-        <img
-          src={posterUrl(item.poster_path, 'w185')}
-          alt={item.title}
-          loading="lazy"
-          className="h-auto w-16 shrink-0 cursor-pointer"
-          onClick={() => onOpen(item.id)}
-        />
-      ) : (
-        <div className="flex aspect-[2/3] w-16 shrink-0 items-center justify-center bg-zinc-100 text-[10px] text-zinc-400">
-          No poster
-        </div>
-      )}
+      <SmartImage
+        src={poster}
+        alt={item.title}
+        crossOrigin="anonymous"
+        objectFit="cover"
+        className="h-auto w-16 shrink-0 cursor-pointer"
+        onClick={() => onOpen(item.kind || 'movie', item.id)}
+      />
       <div className="min-w-0 flex-1">
         <button
-          onClick={() => onOpen(item.id)}
+          onClick={() => onOpen(item.kind || 'movie', item.id)}
           className="block truncate text-left text-sm font-semibold text-zinc-900 hover:underline"
           title={item.title}
         >
+          {isTv && (
+            <span className="mr-1.5 border border-zinc-400 px-1 py-px text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+              TV
+            </span>
+          )}
           {item.title}
           {item.year && <span className="ml-1.5 font-normal text-zinc-500">{item.year}</span>}
         </button>
@@ -39,16 +42,29 @@ function MovieCard({ item, list, onOpen, onRemove }) {
           {list === 'watched' && item.myRating > 0 && (
             <span className="font-semibold text-amber-600">★ {item.myRating}</span>
           )}
-          <span>TMDB {item.rating?.toFixed(1)}</span>
-          {item.runtime > 0 && <span>{formatRuntime(item.runtime)}</span>}
-          {item.director && <span className="truncate">Dir: {item.director}</span>}
+          {item.rating != null && (
+            <span>{isTv ? 'TVmaze' : 'TMDB'} {Number(item.rating).toFixed(1)}</span>
+          )}
+          {isTv ? (
+            <>
+              {item.seasonsCount != null && (
+                <span>{item.seasonsCount} Season{item.seasonsCount === 1 ? '' : 's'}</span>
+              )}
+              {item.network && <span className="truncate">{item.network}</span>}
+            </>
+          ) : (
+            <>
+              {item.runtime > 0 && <span>{formatRuntime(item.runtime)}</span>}
+              {item.director && <span className="truncate">Dir: {item.director}</span>}
+            </>
+          )}
         </div>
         {item.genres?.length > 0 && (
           <p className="mt-1 truncate text-[11px] text-zinc-400">{item.genres.join(' · ')}</p>
         )}
       </div>
       <button
-        onClick={() => onRemove(item.id)}
+        onClick={() => onRemove(item.kind || 'movie', item.id)}
         aria-label="Remove from list"
         className="flex h-7 w-7 shrink-0 items-center justify-center text-zinc-400 transition hover:bg-black hover:text-white"
       >
@@ -61,7 +77,7 @@ function MovieCard({ item, list, onOpen, onRemove }) {
   )
 }
 
-export default function LibraryPage({ onOpenMovie, onGoHome }) {
+export default function LibraryPage({ onOpenTitle, onGoHome }) {
   const [tab, setTab] = useState('watched')
   const { watched, watchlater, removeFromWatched, removeFromWatchLater } = useLibrary()
 
@@ -136,11 +152,11 @@ export default function LibraryPage({ onOpenMovie, onGoHome }) {
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {items.map((item) => (
-              <MovieCard
-                key={item.id}
+              <TitleCard
+                key={`${item.kind || 'movie'}:${item.id}`}
                 item={item}
                 list={tab}
-                onOpen={onOpenMovie}
+                onOpen={onOpenTitle}
                 onRemove={handleRemove}
               />
             ))}

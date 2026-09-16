@@ -14,7 +14,18 @@ const SIZES = [
 
 const COLORS = ['#131313', '#F3EFE7', '#14432A', '#6D1F2C', '#16283F']
 
-const OPTIONS = [
+// 字体颜色：auto 表示根据背景明暗自动反色
+const TEXT_COLORS = [
+  { id: 'auto', label: 'Auto', hex: null },
+  { id: 'white', label: 'White', hex: '#FFFFFF' },
+  { id: 'black', label: 'Black', hex: '#000000' },
+  { id: 'cream', label: 'Cream', hex: '#F3EFE7' },
+  { id: 'gold', label: 'Gold', hex: '#D4A857' },
+  { id: 'red', label: 'Red', hex: '#E63946' },
+  { id: 'blue', label: 'Blue', hex: '#4A90D9' },
+]
+
+const MOVIE_OPTIONS = [
   { key: 'showRatings', label: 'Ratings' },
   { key: 'showYear', label: 'Year' },
   { key: 'showOverview', label: 'Synopsis' },
@@ -23,6 +34,20 @@ const OPTIONS = [
   { key: 'showDop', label: 'Cinematography' },
   { key: 'showCast', label: 'Cast' },
   { key: 'showSpecs', label: 'Tech Specs' },
+  { key: 'showNote', label: 'My Note' },
+]
+
+// 剧集没有导演/摄影/tech specs，换成播出事实行
+const SHOW_OPTIONS = [
+  { key: 'showRatings', label: 'Ratings' },
+  { key: 'showYear', label: 'Year' },
+  { key: 'showOverview', label: 'Synopsis' },
+  { key: 'showCast', label: 'Cast' },
+  { key: 'showShowYears', label: 'Years' },
+  { key: 'showShowSeasons', label: 'Seasons' },
+  { key: 'showShowNetwork', label: 'Network' },
+  { key: 'showShowStatus', label: 'Status' },
+  { key: 'showNote', label: 'My Note' },
 ]
 
 // 竖版卡片预览宽（px）。卡片按 1080px 全尺寸离屏渲染，再缩放到预览
@@ -37,11 +62,12 @@ const pill = (active) =>
 
 const label = 'mr-1 text-xs uppercase tracking-[0.2em] text-zinc-600'
 
-export default function CardStudio({ movie, specs, specsLoading, ratings, ratingsLoading, personal, onPersonal, cardImage, onClearCardImage }) {
+export default function CardStudio({ movie, specs, specsLoading, ratings, ratingsLoading, personal, onPersonal, cardImage, onClearCardImage, note }) {
   const [config, setConfig] = useState({
     template: 'minimal',
     size: '4:5',
     bgColor: '#131313',
+    textColor: 'auto',
     showRatings: true,
     showRating: true,
     showImdb: true,
@@ -56,6 +82,11 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
     showDop: true,
     showCast: true,
     showSpecs: true,
+    showNote: false,
+    showShowYears: true,
+    showShowSeasons: true,
+    showShowNetwork: true,
+    showShowStatus: true,
   })
   const [exporting, setExporting] = useState(false)
   // 评分星星悬浮预览：0 = 未悬浮，显示已选评分
@@ -84,8 +115,10 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
   const set = (patch) => setConfig((c) => ({ ...c, ...patch }))
 
   // 可选择是否上卡的评分源；value 为 null 表示该评分当前不可用
+  const isShow = movie.kind === 'tv'
+  const options = isShow ? SHOW_OPTIONS : MOVIE_OPTIONS
   const ratingSources = [
-    { key: 'showRating', label: 'TMDB', value: typeof movie.rating === 'number' ? movie.rating.toFixed(1) : null },
+    { key: 'showRating', label: isShow ? 'TVmaze' : 'TMDB', value: typeof movie.rating === 'number' ? movie.rating.toFixed(1) : null },
     { key: 'showImdb', label: 'IMDb', value: ratings?.imdb != null ? ratings.imdb.toFixed(1) : null },
     { key: 'showRt', label: 'Tomatometer', value: ratings?.rotten_tomatoes != null ? `${ratings.rotten_tomatoes}%` : null },
     { key: 'showPop', label: 'Popcornmeter', value: ratings?.popcornmeter != null ? `${ratings.popcornmeter}%` : null },
@@ -153,7 +186,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
   }
 
   const loadingText = [
-    specsLoading && 'tech specs',
+    !isShow && specsLoading && 'tech specs',
     ratingsLoading && 'ratings',
   ]
     .filter(Boolean)
@@ -230,10 +263,36 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
         </div>
       </div>
 
+      <div className="mt-3 flex flex-col gap-2">
+        <span className={label}>Font color</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {TEXT_COLORS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => set({ textColor: t.id })}
+              title={t.label}
+              className={`h-6 w-6 border transition ${
+                config.textColor === t.id
+                  ? 'border-black ring-1 ring-black ring-offset-1'
+                  : 'border-zinc-300 hover:border-zinc-500'
+              }`}
+              style={t.hex ? { background: t.hex } : { background: 'linear-gradient(135deg, #fff 50%, #000 50%)' }}
+            />
+          ))}
+          <input
+            type="color"
+            value={TEXT_COLORS.find((t) => t.id === config.textColor)?.hex || '#FFFFFF'}
+            onChange={(e) => set({ textColor: e.target.value })}
+            aria-label="custom font color"
+            className="h-6 w-8 cursor-pointer border border-zinc-300 bg-white"
+          />
+        </div>
+      </div>
+
       <div className="mt-4">
         <span className={label}>Show</span>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          {OPTIONS.map((o) => (
+          {options.map((o) => (
             <button
               key={o.key}
               onClick={() => set({ [o.key]: !config[o.key] })}
@@ -270,9 +329,6 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   }`}
                 >
                   {s.label}
-                  <span className={active ? 'ml-1 opacity-70' : 'ml-1 opacity-50'}>
-                    {s.value ?? '—'}
-                  </span>
                 </button>
               )
             })}
@@ -355,6 +411,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
             ratings={ratings}
             personal={personal}
             customImage={cardImage}
+            note={note}
           />
           {/* 悬浮/触摸提示：点击放大 */}
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition duration-200 group-hover:bg-black/25 group-hover:opacity-100">

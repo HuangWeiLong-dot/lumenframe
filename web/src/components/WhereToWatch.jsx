@@ -51,18 +51,27 @@ function SourceBadge({ s }) {
 }
 
 export default function WhereToWatch({ movie }) {
+  const isTv = movie?.kind === 'tv'
   const tmdbId = movie?.id
+  const imdbId = movie?.imdb_id
   const [status, setStatus] = useState('loading')
   const [sources, setSources] = useState([])
 
   useEffect(() => {
-    if (!tmdbId) return
+    // 电影用 tmdbId；剧集用 imdb_id（无则不请求）
+    if (isTv) {
+      if (!imdbId) return
+    } else if (!tmdbId) return
     let alive = true
     setStatus('loading')
     setSources([])
 
+    const url = isTv
+      ? apiUrl(`/api/watch/tv/${imdbId}`)
+      : apiUrl(`/api/watch/${tmdbId}`)
+
     const timer = setTimeout(() => {
-      fetch(apiUrl(`/api/watch/${tmdbId}`))
+      fetch(url)
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           return r.json()
@@ -79,7 +88,7 @@ export default function WhereToWatch({ movie }) {
       alive = false
       clearTimeout(timer)
     }
-  }, [tmdbId])
+  }, [isTv, tmdbId, imdbId])
 
   // 出错也保留区块，显示网络问题
   if (status === 'error') {

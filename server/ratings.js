@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { getRtScores } from './rt.js'
 
 // 缓存结构版本：升级字段后旧缓存自动失效重抓一次
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 
 const OMDB_API_KEY = process.env.OMDB_API_KEY
 const OMDB_URL = 'https://www.omdbapi.com/'
@@ -51,6 +51,7 @@ async function getOmdbRatings(imdbId) {
       imdb: Number.isFinite(imdb) && imdb > 0 ? Number(imdb.toFixed(1)) : null,
       metacritic: Number.isFinite(metascore) && metascore > 0 ? metascore : null,
       rotten_tomatoes: Number.isFinite(rottenTomatoes) ? rottenTomatoes : null,
+      awards: data.Awards && data.Awards !== 'N/A' ? data.Awards : null,
     }
   } catch {
     return null
@@ -58,7 +59,7 @@ async function getOmdbRatings(imdbId) {
 }
 
 export async function getRatings(imdbId, title, year) {
-  const empty = { imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null }
+  const empty = { imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null, awards: null }
   const fail = failCache.get(imdbId)
   if (fail && Date.now() - fail < FAIL_TTL) return { ...empty, cache: 'fail' }
 
@@ -80,6 +81,7 @@ export async function getRatings(imdbId, title, year) {
     metacritic: omdb?.metacritic ?? null,
     rotten_tomatoes: omdb?.rotten_tomatoes ?? rt?.critics ?? null,
     popcornmeter: rt?.audience ?? null,
+    awards: omdb?.awards ?? null,
   }
 
   if (data.imdb == null && data.metacritic == null &&

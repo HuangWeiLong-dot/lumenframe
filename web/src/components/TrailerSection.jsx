@@ -78,6 +78,9 @@ function CommentItem({ c }) {
 
 export default function TrailerSection({ movie }) {
   const tmdbId = movie?.id
+  const isTv = movie?.kind === 'tv'
+  const title = movie?.title
+  const year = movie?.year || ''
 
   const [status, setStatus] = useState('loading') // loading | done | error
   const [trailer, setTrailer] = useState(null)    // null | false(无) | 对象
@@ -85,9 +88,12 @@ export default function TrailerSection({ movie }) {
   const [commentsStatus, setCommentsStatus] = useState('loading')
   const [playing, setPlaying] = useState(false)
 
-  // 取预告片：TMDB /movie/{id}/videos（经 Node 后端代理，自带缓存）
+  // 取预告片：
+  //   电影 → TMDB /movie/{id}/videos（经 Node 后端代理，自带缓存）
+  //   剧集 → filmgrab-service 的 YouTube 搜索（剧名 + 首播年份）
   useEffect(() => {
-    if (!tmdbId) return
+    if (!tmdbId && !isTv) return
+    if (isTv && !title) return
     let alive = true
     setStatus('loading')
     setTrailer(null)
@@ -96,7 +102,14 @@ export default function TrailerSection({ movie }) {
     setCommentsStatus('loading')
 
     const timer = setTimeout(() => {
-      fetch(apiUrl(`/api/trailer/${tmdbId}`))
+      let url
+      if (isTv) {
+        const qs = `movie=${encodeURIComponent(title)}&year=${encodeURIComponent(year)}`
+        url = `${FILMGRAB_BASE}/trailer?${qs}`
+      } else {
+        url = apiUrl(`/api/trailer/${tmdbId}`)
+      }
+      fetch(url)
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           return r.json()
@@ -113,7 +126,7 @@ export default function TrailerSection({ movie }) {
       alive = false
       clearTimeout(timer)
     }
-  }, [tmdbId])
+  }, [tmdbId, isTv, title, year])
 
   // 预告片确定后取热门评论（YouTube Data API，经 Python 服务代理）
   const videoId = trailer?.videoId

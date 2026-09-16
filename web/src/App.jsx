@@ -2,27 +2,38 @@ import { useEffect, useRef, useState } from 'react'
 import CardStudio from './components/CardStudio'
 import CollapsibleSection from './components/CollapsibleSection'
 import MovieCollage from './components/MovieCollage'
+import QuizRecommender from './components/QuizRecommender'
 import FilmGrabShots from './components/FilmGrabShots'
 import TrailerSection from './components/TrailerSection'
 import WhereToWatch from './components/WhereToWatch'
 import Torrents from './components/Torrents'
+import TasteDiveSimilar from './components/TasteDiveSimilar'
+import AlsoLiked from './components/AlsoLiked'
+import SmartImage from './components/SmartImage'
+import ShowEpisodes from './components/ShowEpisodes'
+import TvBackdrops from './components/TvBackdrops'
 import Footer from './components/Footer'
 import Header from './components/Header'
 import LibraryPage from './components/LibraryPage'
+import PersonPage from './components/PersonPage'
+import GenrePage from './components/GenrePage'
 import { useTrending } from './hooks/useTrending'
 import { useLibrary } from './hooks/useLibrary'
-import { apiUrl, posterUrl, downloadImage } from './api'
+import { usePinned } from './hooks/usePinned'
+import { apiUrl, posterUrl, posterFor, downloadImage } from './api'
+import { genreIdByName } from './genres'
 
 // ---- 极简 History API 路由 ----
-// 路由格式：{BASE}movie/{tmdbId}-{片名 slug}，如 /movie/123-dead-poets-society
+// 电影：{BASE}movie/{tmdbId}-{slug}；剧集：{BASE}tv/{tvmazeId}-{slug}
+// 演职员：{BASE}person/{tmdbPersonId}-{slug}
 // id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省
 
 // 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
-// 深链 /movie/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
+// 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
 function getBasePath() {
   const p = window.location.pathname
-  const i = p.indexOf('/movie/')
-  if (i >= 0) return p.slice(0, i + 1)
+  const m = p.match(/\/(movie|tv)\//)
+  if (m) return p.slice(0, m.index + 1)
   if (p.endsWith('/')) return p
   return p.slice(0, p.lastIndexOf('/') + 1)
 }
@@ -38,15 +49,43 @@ function slugify(title) {
     .replace(/-+/g, '-')
 }
 
-function movieUrl(id, title) {
+function titleUrl(kind, id, title) {
   const slug = slugify(title)
-  return `${BASE_PATH}movie/${id}${slug ? `-${slug}` : ''}`
+  return `${BASE_PATH}${kind === 'tv' ? 'tv' : 'movie'}/${id}${slug ? `-${slug}` : ''}`
 }
 
-// 从当前 location 解析电影路由；非电影页返回 null
+function movieUrl(id, title) {
+  return titleUrl('movie', id, title)
+}
+
+function personUrl(id, name) {
+  const slug = slugify(name)
+  return `${BASE_PATH}person/${id}${slug ? `-${slug}` : ''}`
+}
+
+function genreUrl(kind, id, name) {
+  const slug = slugify(name)
+  return `${BASE_PATH}genre/${kind}/${id}${slug ? `-${slug}` : ''}`
+}
+
+// 从当前 location 解析标题路由；非标题页返回 null
+function parseTitleRoute() {
+  const m = window.location.pathname.match(/\/(movie|tv)\/(\d+)(?:-.*)?\/?$/)
+  return m ? { kind: m[1] === 'tv' ? 'tv' : 'movie', id: Number(m[2]) } : null
+}
+
+function parsePersonRoute() {
+  const m = window.location.pathname.match(/\/person\/(\d+)(?:-.*)?\/?$/)
+  return m ? { id: Number(m[1]) } : null
+}
+
+function parseGenreRoute() {
+  const m = window.location.pathname.match(/\/genre\/(movie|tv)\/(\d+)(?:-.*)?\/?$/)
+  return m ? { kind: m[1], id: Number(m[2]) } : null
+}
+
 function parseMovieRoute() {
-  const m = window.location.pathname.match(/\/movie\/(\d+)(?:-.*)?\/?$/)
-  return m ? Number(m[1]) : null
+  return parseTitleRoute()?.id ?? null
 }
 
 function libraryUrl() {
@@ -179,17 +218,18 @@ function WatchButton({ active, onClick, label }) {
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-xs font-medium uppercase tracking-[0.1em] transition ${
+      className={`inline-flex min-w-[120px] items-center justify-center gap-1.5 border px-4 py-2 text-sm font-medium uppercase tracking-[0.1em] transition ${
         active
           ? 'border-black bg-black text-white'
           : 'border-zinc-300 text-zinc-700 hover:border-zinc-500 hover:bg-zinc-50'
       }`}
     >
-      {active && (
-        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-      )}
+      <svg
+        className={`h-3 w-3 transition ${active ? 'opacity-100' : 'opacity-0'}`}
+        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
       {label}
     </button>
   )
@@ -198,15 +238,36 @@ function WatchButton({ active, onClick, label }) {
 export default function App() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
+  const [personResults, setPersonResults] = useState([])
   const [suggestLoading, setSuggestLoading] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [error, setError] = useState('')
   const [movie, setMovie] = useState(null)
-  // 首屏若是深链（/movie/...），直接进入加载态，避免首页闪一下
-  const initialMovieIdRef = useRef(parseMovieRoute())
+  // 首屏若是深链（/movie/... 或 /tv/...），直接进入加载态，避免首页闪一下
+  const initialTitleRef = useRef(parseTitleRoute())
   const initialLibraryRef = useRef(parseLibraryRoute())
-  const [view, setView] = useState(initialLibraryRef.current ? 'library' : 'home')
-  const [detailLoading, setDetailLoading] = useState(initialMovieIdRef.current != null)
+  const initialPersonRef = useRef(parsePersonRoute())
+  const initialGenreRef = useRef(parseGenreRoute())
+  const [view, setView] = useState(
+    initialLibraryRef.current
+      ? 'library'
+      : initialPersonRef.current
+        ? 'person'
+        : initialGenreRef.current
+          ? 'genre'
+          : 'home'
+  )
+  const [person, setPerson] = useState(
+    initialPersonRef.current ? { id: initialPersonRef.current.id, name: '' } : null
+  )
+  const [genre, setGenre] = useState(
+    initialGenreRef.current
+      ? { kind: initialGenreRef.current.kind, id: initialGenreRef.current.id, name: '' }
+      : null
+  )
+  const [personSearchLoading, setPersonSearchLoading] = useState(false)
+  const [personSearchError, setPersonSearchError] = useState('')
+  const [detailLoading, setDetailLoading] = useState(initialTitleRef.current != null)
   const [specs, setSpecs] = useState(null)
   const [specsLoading, setSpecsLoading] = useState(false)
   const [ratings, setRatings] = useState(null)
@@ -216,6 +277,9 @@ export default function App() {
   const [imagesLoading, setImagesLoading] = useState(false)
   const [personal, setPersonal] = useState(0)
   const [hoverRating, setHoverRating] = useState(0)
+  // 短评：加载电影时从 library 读取；防抖保存
+  const [note, setNoteState] = useState('')
+  const noteTimerRef = useRef(null)
   // 从 Posters / Film Stills / Backdrops 中挑选、用于生成卡片的自定义图片（null = 官方主海报）
   const [cardImage, setCardImage] = useState(null)
   // Backdrops / Posters 灯箱当前图片
@@ -226,6 +290,7 @@ export default function App() {
   const reqTokenRef = useRef(0)
   // 本地观影库（watched / watch later）
   const lib = useLibrary()
+  const pins = usePinned()
   // 当前电影页能否用浏览器后退：应用内点选进来为 true（回到上一页）；
   // 深链直接打开为 false（Back 按钮改走回主页）
   const canBackRef = useRef(false)
@@ -245,26 +310,41 @@ export default function App() {
   // 输入时实时搜索：300ms 防抖 + 序号守卫防止旧请求晚返回造成乱序。
   // 不用 AbortController——取消在途 fetch 会让浏览器打印 net::ERR_ABORTED；
   // 旧响应靠 seq 丢弃即可（请求本身很轻，且后端有缓存）。
+  // 同时并行查 TMDB person（演职员），让用户能直接搜导演/演员名进入其作品页。
   const searchSeqRef = useRef(0)
   useEffect(() => {
     const q = query.trim()
     if (!q) {
       setResults([])
+      setPersonResults([])
       setSuggestLoading(false)
       return
     }
     setSuggestLoading(true)
     const seq = ++searchSeqRef.current
     const timer = setTimeout(async () => {
+      const [titleRes, personRes] = await Promise.allSettled([
+        fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`)),
+        fetch(apiUrl(`/api/person/search?q=${encodeURIComponent(q)}&limit=5`)),
+      ])
+      if (seq !== searchSeqRef.current) return
       try {
-        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`))
-        const data = await res.json()
-        if (seq !== searchSeqRef.current) return
-        if (!res.ok) throw new Error(data.error || 'Search failed')
-        setResults(data.results || [])
-      } catch {
-        if (seq === searchSeqRef.current) setResults([])
-      } finally {
+        if (titleRes.status === 'fulfilled' && titleRes.value.ok) {
+          const data = await titleRes.value.json()
+          setResults(data.results || [])
+        } else {
+          setResults([])
+        }
+      } catch { setResults([]) }
+      try {
+        if (personRes.status === 'fulfilled' && personRes.value.ok) {
+          const data = await personRes.value.json()
+          setPersonResults(data.results || [])
+        } else {
+          setPersonResults([])
+        }
+      } catch { setPersonResults([]) }
+      finally {
         if (seq === searchSeqRef.current) setSuggestLoading(false)
       }
     }, 300)
@@ -323,7 +403,13 @@ export default function App() {
       const url = apiUrl(`/api/ratings/${m.imdb_id}?title=${encodeURIComponent(m.title)}&year=${m.year}`)
       const res = await fetch(url)
       if (token !== reqTokenRef.current) return
-      setRatings(res.ok ? await res.json() : { imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null })
+      const data = res.ok
+        ? await res.json()
+        : { imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null }
+      setRatings(data)
+      // 同步到观影库，让数据分析页能聚合多源评分
+      const kind = m.kind === 'tv' ? 'tv' : 'movie'
+      lib.updateRatings(kind, m.id, data)
     } catch {
       if (token !== reqTokenRef.current) return
       setRatings({ imdb: null, metacritic: null, rotten_tomatoes: null, popcornmeter: null })
@@ -353,12 +439,17 @@ export default function App() {
     }
   }
 
-  // 个人评分仅保存在本机浏览器，按 TMDB id 区分；同时同步到观影库
+  // 个人评分仅保存在本机浏览器（电影沿用旧 key，剧集带 tv: 前缀）；同时同步到观影库
+  function ratingStorageKey(kind, id) {
+    return kind === 'tv' ? `lumenframe:myrating:tv:${id}` : `lumenframe:myrating:${id}`
+  }
+
   function changePersonal(v) {
     setPersonal(v)
     if (movie) {
-      localStorage.setItem(`lumenframe:myrating:${movie.id}`, String(v))
-      lib.updateMyRating(movie.id, v)
+      const kind = movie.kind === 'tv' ? 'tv' : 'movie'
+      localStorage.setItem(ratingStorageKey(kind, movie.id), String(v))
+      lib.updateMyRating(kind, movie.id, v)
     }
   }
 
@@ -366,12 +457,24 @@ export default function App() {
   function handleRate(n) {
     const v = personal === n ? 0 : n
     changePersonal(v)
-    if (v > 0 && movie && !lib.isInWatched(movie.id)) {
-      lib.addToWatched(movie, v)
+    if (v > 0 && movie) {
+      const kind = movie.kind === 'tv' ? 'tv' : 'movie'
+      if (!lib.isInWatched(kind, movie.id)) lib.addToWatched({ ...movie, ratings }, v)
     }
   }
 
-  // 清空当前电影的全部视图状态（回主页 / 前进后退到主页时复用）
+  // 短评：防抖 500ms 保存到 library
+  function handleNoteChange(text) {
+    setNoteState(text)
+    if (!movie) return
+    const kind = movie.kind === 'tv' ? 'tv' : 'movie'
+    if (noteTimerRef.current) clearTimeout(noteTimerRef.current)
+    noteTimerRef.current = setTimeout(() => {
+      lib.setNote(kind, movie.id, text.trim())
+    }, 500)
+  }
+
+  // 清空当前标题的全部视图状态（回主页 / 前进后退到主页时复用）
   function resetMovieView() {
     setError('')
     setCardImage(null)
@@ -385,8 +488,8 @@ export default function App() {
   }
 
   // history: 'push' 点击选片（新增历史条目）；'none' 前进后退/深链/首屏（URL 已就位）
-  async function openMovie(id, { history = 'push', scroll = true } = {}) {
-    // 新请求使所有在途旧请求失效，杜绝快速切换时旧电影数据串到新电影页面
+  async function openTitle(kind, id, { history = 'push', scroll = true } = {}) {
+    // 新请求使所有在途旧请求失效，杜绝快速切换时旧数据串到新页面
     const token = ++reqTokenRef.current
     setView('movie')
     setDetailLoading(true)
@@ -401,29 +504,42 @@ export default function App() {
     setBackdrops([])
     setPosters([])
     try {
-      const res = await fetch(apiUrl(`/api/movie/${id}`))
+      const endpoint = kind === 'tv' ? `/api/tv/${id}` : `/api/movie/${id}`
+      const res = await fetch(apiUrl(endpoint))
       if (token !== reqTokenRef.current) return
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to load movie')
+      if (!res.ok) throw new Error(data.error || `Failed to load ${kind === 'tv' ? 'show' : 'movie'}`)
       setMovie(data)
-      setPersonal(Number(localStorage.getItem(`lumenframe:myrating:${data.id}`)) || 0)
+      setPersonal(Number(localStorage.getItem(ratingStorageKey(kind, data.id))) || 0)
+      // 加载短评
+      setNoteState(lib.getNote(kind, data.id))
       // 同步规范 URL（含正式片名 slug）；popstate/深链只在 slug 缺失或不符时 replace
-      const canonical = movieUrl(data.id, data.title)
+      const canonical = titleUrl(kind, data.id, data.title)
       if (history === 'push') {
-        window.history.pushState({ movieId: data.id }, '', canonical)
+        window.history.pushState({ kind, id: data.id }, '', canonical)
         canBackRef.current = true
       } else if (window.location.pathname !== canonical) {
-        window.history.replaceState({ movieId: data.id }, '', canonical)
+        window.history.replaceState({ kind, id: data.id }, '', canonical)
       }
       if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
-      loadSpecs(data, token)
       loadRatings(data, token)
-      loadImages(id, token)
+      if (kind === 'movie') {
+        loadSpecs(data, token)
+        loadImages(id, token)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
       if (token === reqTokenRef.current) setDetailLoading(false)
     }
+  }
+
+  function openMovie(id, opts) {
+    return openTitle('movie', id, opts)
+  }
+
+  function openShow(id, opts) {
+    return openTitle('tv', id, opts)
   }
 
   // 回主页：清状态 + URL 回根（已是根则不入栈）
@@ -446,10 +562,77 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // 打开演职员详情页：source='tmdb' 时 id 直接是 TMDB person id；
+  // source='tvmaze'（剧集 cast）时需先用名字查 TMDB person，再跳转
+  async function openPerson({ id, name, source = 'tmdb' } = {}, { history: historyOpt = 'push', scroll = true } = {}) {
+    let tmdbId = null
+    if (source === 'tmdb' && id) {
+      tmdbId = id
+    } else if (name) {
+      setPersonSearchLoading(true)
+      setPersonSearchError('')
+      try {
+        const qs = new URLSearchParams({ q: name, limit: '1' })
+        const r = await fetch(apiUrl(`/api/person/search?${qs}`))
+        if (r.ok) {
+          const data = await r.json()
+          tmdbId = data.results?.[0]?.id
+        }
+      } catch { /* swallow */ }
+      finally {
+        setPersonSearchLoading(false)
+      }
+      if (!tmdbId) {
+        setPersonSearchError(`Couldn't find "${name}" on TMDB. Try searching from the search box.`)
+        // 5 秒后自动清掉错误提示
+        setTimeout(() => setPersonSearchError(''), 5000)
+        return
+      }
+    }
+    if (!tmdbId) return
+    reqTokenRef.current++
+    resetMovieView()
+    setPerson({ id: tmdbId, name: name || '' })
+    setView('person')
+    const url = personUrl(tmdbId, name)
+    if (historyOpt === 'push') {
+      window.history.pushState({ person: true, id: tmdbId, name: name || '' }, '', url)
+      canBackRef.current = true
+    } else if (window.location.pathname !== url) {
+      window.history.replaceState({ person: true, id: tmdbId, name: name || '' }, '', url)
+    }
+    if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // 打开类型浏览页（已有 TMDB id）
+  function openGenre(kind, id, name, { history: historyOpt = 'push', scroll = true } = {}) {
+    if (!id) return
+    reqTokenRef.current++
+    resetMovieView()
+    setGenre({ kind, id, name: name || '' })
+    setView('genre')
+    const url = genreUrl(kind, id, name)
+    if (historyOpt === 'push') {
+      window.history.pushState({ genre: true, kind, id, name: name || '' }, '', url)
+      canBackRef.current = true
+    } else if (window.location.pathname !== url) {
+      window.history.replaceState({ genre: true, kind, id, name: name || '' }, '', url)
+    }
+    if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // 详情页点击 genres 字符串时调用：用名字反查 TMDB id，再跳转
+  function openGenreByName(name, kind) {
+    const id = genreIdByName(name, kind)
+    if (!id) return
+    openGenre(kind, id, name)
+  }
+
   // 首屏深链直开
   useEffect(() => {
-    if (initialMovieIdRef.current != null) {
-      openMovie(initialMovieIdRef.current, { history: 'none', scroll: false })
+    if (initialTitleRef.current != null) {
+      const { kind, id } = initialTitleRef.current
+      openTitle(kind, id, { history: 'none', scroll: false })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -457,11 +640,23 @@ export default function App() {
   // 浏览器前进 / 后退
   useEffect(() => {
     const onPop = () => {
-      const id = parseMovieRoute()
-      // 后退/前进到电影页时仍可继续后退；落到主页/库页则 Back 应回主页
-      canBackRef.current = id != null
-      if (id != null) {
-        openMovie(id, { history: 'none', scroll: false })
+      const titleRoute = parseTitleRoute()
+      const personRoute = parsePersonRoute()
+      const genreRoute = parseGenreRoute()
+      // 后退/前进到标题/演职员/类型页时仍可继续后退；落到主页/库页则 Back 应回主页
+      canBackRef.current = titleRoute != null || personRoute != null || genreRoute != null
+      if (titleRoute != null) {
+        openTitle(titleRoute.kind, titleRoute.id, { history: 'none', scroll: false })
+      } else if (personRoute != null) {
+        reqTokenRef.current++
+        resetMovieView()
+        setPerson({ id: personRoute.id, name: '' })
+        setView('person')
+      } else if (genreRoute != null) {
+        reqTokenRef.current++
+        resetMovieView()
+        setGenre({ kind: genreRoute.kind, id: genreRoute.id, name: '' })
+        setView('genre')
       } else if (parseLibraryRoute()) {
         reqTokenRef.current++
         resetMovieView()
@@ -480,17 +675,56 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <PosterBackground />
-      <Header onHome={goHome} onLibrary={goLibrary} />
+      <Header onHome={goHome} onLibrary={goLibrary} pinned={pins.pinned} onPickPinned={(p) => openTitle(p.kind, p.id)} onUnpin={(p) => pins.removePin(p.kind, p.id)} />
 
+      {/* TV 演员跳转 TMDB 时的查找提示：右下角 toast */}
+      {(personSearchLoading || personSearchError) && (
+        <div className="fixed bottom-6 right-6 z-[1100] border border-zinc-200 bg-white px-4 py-3 text-xs shadow-lg">
+          {personSearchLoading ? (
+            <span className="text-zinc-700">Looking up person on TMDB…</span>
+          ) : (
+            <span className="text-red-600">{personSearchError}</span>
+          )}
+        </div>
+      )}
       {view === 'library' ? (
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-24"
           style={{ fontFamily: "'Inter', Arial, sans-serif" }}
         >
           <LibraryPage
-            onOpenMovie={(id) => openMovie(id)}
+            onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
             onGoHome={goHome}
           />
+        </main>
+      ) : view === 'person' ? (
+        <main
+          className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
+          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
+        >
+          {person && (
+            <PersonPage
+              personId={person.id}
+              onBack={() => (canBackRef.current ? window.history.back() : goHome())}
+              onOpenMovie={openMovie}
+              onOpenShow={openShow}
+            />
+          )}
+        </main>
+      ) : view === 'genre' ? (
+        <main
+          className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
+          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
+        >
+          {genre && (
+            <GenrePage
+              kind={genre.kind}
+              genreId={genre.id}
+              genreName={genre.name}
+              onBack={() => (canBackRef.current ? window.history.back() : goHome())}
+              onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
+            />
+          )}
         </main>
       ) : (
       <main
@@ -509,14 +743,14 @@ export default function App() {
       </h1>
       <p className="mt-3 text-center text-xs uppercase tracking-[0.3em] text-zinc-700">Every Frame Tells A Story</p>
 
-      {/* 搜索框 + 紧贴下方的实时建议下拉面板（不必通栏：桌面收窄居中，移动端自然铺满） */}
+      {/* 搜索框 + 紧贴下方的实时建议下拉面板（电影与剧集混合搜索，无需切换） */}
       <div ref={searchBoxRef} className="relative z-40 mx-auto mt-12 w-full max-w-xl">
         <form onSubmit={handleSearch} className="flex gap-0 border-b border-black">
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true) }}
             onFocus={() => { if (query.trim()) setDropdownOpen(true) }}
-            placeholder="Search a movie, e.g. Interstellar"
+            placeholder="Search movies & TV shows, e.g. Interstellar or Breaking Bad"
             autoComplete="off"
             className="flex-1 bg-transparent py-3 text-base text-black outline-none placeholder:text-zinc-500"
           />
@@ -531,53 +765,116 @@ export default function App() {
 
         {dropdownOpen && query.trim() && (
           <div className="absolute inset-x-0 top-full max-h-[60vh] overflow-y-auto border border-zinc-300 border-t-0 bg-white shadow-xl">
-            {suggestLoading && results.length === 0 && (
+            {suggestLoading && results.length === 0 && personResults.length === 0 && (
               <p className="px-4 py-6 text-center text-sm text-zinc-600">Searching…</p>
             )}
-            {!suggestLoading && results.length === 0 && (
+            {!suggestLoading && results.length === 0 && personResults.length === 0 && (
               <p className="px-4 py-6 text-center text-sm text-zinc-600">No results found</p>
             )}
-            {results.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => openMovie(m.id)}
-                className="flex w-full gap-3 border-b border-zinc-100 px-3 py-3 text-left transition last:border-0 hover:bg-zinc-50"
-              >
-                {/* 固定 2:3 海报框 + object-cover，任何海报都不会拉伸 */}
-                <div className="h-24 w-16 shrink-0 overflow-hidden bg-zinc-100">
-                  {m.poster_path ? (
-                    <img
-                      src={posterUrl(m.poster_path, 'w185')}
-                      alt=""
-                      loading="lazy"
-                      crossOrigin="anonymous"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center p-1 text-center text-[10px] text-zinc-500">
-                      No poster
-                    </div>
-                  )}
-                </div>
-                <div className="min-w-0 flex-1 py-0.5">
-                  <p className="truncate text-sm font-semibold text-zinc-900">
-                    {m.title}
-                    {m.year && <span className="ml-1.5 font-normal text-zinc-500">{m.year}</span>}
-                    {m.rating > 0 && (
-                      <span className="ml-2 font-normal text-amber-600">★ {m.rating.toFixed(1)}</span>
-                    )}
-                  </p>
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-600">
-                    {m.overview || 'No description available.'}
-                  </p>
-                </div>
-              </button>
-            ))}
+
+            {/* People 段：TMDB 演职员结果 */}
+            {personResults.length > 0 && (
+              <>
+                <p className="sticky top-0 bg-white px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-400">
+                  People
+                </p>
+                {personResults.map((p) => {
+                  const profile = p.profile_path ? posterUrl(p.profile_path, 'w185') : null
+                  const knownTitles = (p.known_for || [])
+                    .map((k) => k.title)
+                    .filter(Boolean)
+                    .slice(0, 3)
+                  return (
+                    <button
+                      key={`p:${p.id}`}
+                      onClick={() => {
+                        setDropdownOpen(false)
+                        setQuery('')
+                        openPerson({
+                          id: p.id,
+                          name: p.name,
+                          source: 'tmdb',
+                        })
+                      }}
+                      className="flex w-full items-center gap-3 border-b border-zinc-100 px-3 py-3 text-left transition hover:bg-zinc-50"
+                    >
+                      <div className="h-16 w-12 shrink-0 overflow-hidden bg-zinc-100">
+                        {profile ? (
+                          <SmartImage src={profile} alt="" className="h-full w-full" objectFit="cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-zinc-400">
+                            No photo
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 py-0.5">
+                        <p className="truncate text-sm font-semibold text-zinc-900">
+                          {p.name}
+                          {p.known_for_department && (
+                            <span className="ml-2 border border-zinc-300 px-1 py-px text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                              {p.known_for_department}
+                            </span>
+                          )}
+                        </p>
+                        {knownTitles.length > 0 && (
+                          <p className="mt-1 line-clamp-1 text-xs text-zinc-600">
+                            Known for: {knownTitles.join(', ')}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+                <p className="sticky bottom-0 bg-white px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-400">
+                  Titles
+                </p>
+              </>
+            )}
+
+            {results.map((m) => {
+              const isTv = m.kind === 'tv'
+              const poster = posterFor(m, 'w185')
+              return (
+                <button
+                  key={`${isTv ? 'tv' : 'm'}:${m.id}`}
+                  onClick={() => (isTv ? openShow(m.id) : openMovie(m.id))}
+                  className="flex w-full gap-3 border-b border-zinc-100 px-3 py-3 text-left transition last:border-0 hover:bg-zinc-50"
+                >
+                  {/* 固定 2:3 海报框 + object-cover，任何海报都不会拉伸 */}
+                  <div className="h-24 w-16 shrink-0 overflow-hidden bg-zinc-100">
+                    <SmartImage src={poster} alt="" className="h-full w-full" />
+                  </div>
+                  <div className="min-w-0 flex-1 py-0.5">
+                    <p className="truncate text-sm font-semibold text-zinc-900">
+                      {isTv && (
+                        <span className="mr-1.5 border border-zinc-400 px-1 py-px text-[9px] font-semibold uppercase tracking-wider text-zinc-500">
+                          TV
+                        </span>
+                      )}
+                      {m.title}
+                      {m.year && <span className="ml-1.5 font-normal text-zinc-500">{m.year}</span>}
+                      {m.rating > 0 && (
+                        <span className="ml-2 font-normal text-amber-600">★ {m.rating.toFixed(1)}</span>
+                      )}
+                    </p>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-600">
+                      {m.overview || 'No description available.'}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
 
       {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
+
+      {!movie && !detailLoading && (
+        <QuizRecommender
+          onPick={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
+        />
+      )}
 
       {!movie && !detailLoading && <MovieCollage onPick={openMovie} />}
 
@@ -598,203 +895,481 @@ export default function App() {
         </button>
       )}
 
-      {movie && !detailLoading && (
+      {movie && !detailLoading && (() => {
+        const isTv = movie.kind === 'tv'
+        const kind = isTv ? 'tv' : 'movie'
+        const poster = posterFor(movie, 'w342')
+        return (
         // 移动端纵向堆叠（海报居中在上、信息在下全宽）；sm 及以上恢复海报左 + 信息右
-        <section className="mt-6 flex flex-col items-center gap-5 sm:mt-8 sm:flex-row sm:items-start sm:gap-6">
-          {/* 只固定宽度，高度按海报真实比例自适应：完整、不拉伸、不裁切、无白边 */}
-          {movie.poster_path ? (
-            <img
-              src={posterUrl(movie.poster_path, 'w342')}
-              alt={movie.title}
-              crossOrigin="anonymous"
-              className="h-auto w-32 shrink-0 self-center sm:w-40 sm:self-start"
-            />
-          ) : (
-            <div className="flex aspect-[2/3] w-32 shrink-0 self-center items-center justify-center border border-zinc-300 text-xs text-zinc-600 sm:w-40 sm:self-start">
-              No poster
-            </div>
-          )}
-          <div className="min-w-0 w-full flex-1 text-center sm:text-left">
-            <h2 className="text-xl font-bold leading-tight sm:text-2xl">{movie.title}</h2>
-            {movie.original_title !== movie.title && (
-              <p className="mt-1 truncate text-sm text-zinc-600">{movie.original_title}</p>
+        <section className="relative mt-6 flex flex-col items-center gap-5 sm:mt-8 sm:flex-row sm:items-stretch sm:gap-8">
+          {/* Pin 到导航栏：右上角图钉按钮 */}
+          <button
+            onClick={() => pins.togglePin(movie)}
+            aria-label={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
+            title={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
+            className={`absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
+              pins.isPinned(kind, movie.id) ? 'text-black' : 'text-zinc-300 hover:text-zinc-500'
+            }`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill={pins.isPinned(kind, movie.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 17v5" />
+              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+            </svg>
+          </button>
+          <SmartImage
+            src={poster}
+            alt={movie.title}
+            crossOrigin="anonymous"
+            objectFit="contain"
+            className="h-auto w-32 shrink-0 self-center shadow-md ring-1 ring-black/5 sm:w-48 sm:self-start"
+          />
+          <div className="min-w-0 w-full flex-1 text-center sm:flex sm:flex-col sm:text-left">
+            {/* 标题 */}
+            <h2 className="text-2xl font-extrabold leading-tight tracking-tight text-zinc-900 sm:text-3xl">
+              {isTv && (
+                <span className="mr-2 inline-block align-middle border border-zinc-300 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  TV
+                </span>
+              )}
+              {movie.title}
+            </h2>
+            {movie.original_title && movie.original_title !== movie.title && (
+              <p className="mt-1 text-sm text-zinc-500">{movie.original_title}</p>
             )}
-            {/* 信息行：时长优先展示，评分依次；移动端居中换行，桌面端左对齐 */}
-            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs text-zinc-700 sm:justify-start sm:text-sm">
-              <span>{movie.year}</span>
-              {movie.runtime > 0 && (
+
+            {/* 元信息行 */}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 text-sm text-zinc-600 sm:justify-start">
+              <span className="font-medium text-zinc-800">{isTv ? (movie.yearRange || movie.year) : movie.year}</span>
+              {!isTv && movie.runtime > 0 && (
                 <>
-                  <span className="text-zinc-300">·</span>
+                  <span className="text-zinc-300">•</span>
                   <span>{Math.floor(movie.runtime / 60)}h {movie.runtime % 60}m</span>
                 </>
               )}
-              <span className="text-zinc-300">·</span>
-              <span>TMDB {movie.rating.toFixed(1)}</span>
-              {ratings?.imdb != null && (
+              {isTv && movie.status && (
                 <>
-                  <span className="text-zinc-300">·</span>
-                  <span>IMDb {ratings.imdb.toFixed(1)}</span>
+                  <span className="text-zinc-300">•</span>
+                  <span>{movie.status}</span>
                 </>
               )}
-              {ratings?.rotten_tomatoes != null && (
+              {isTv && movie.seasonsCount != null && (
                 <>
-                  <span className="text-zinc-300">·</span>
-                  <span>🍅 {ratings.rotten_tomatoes}%</span>
+                  <span className="text-zinc-300">•</span>
+                  <span>{movie.seasonsCount} Season{movie.seasonsCount === 1 ? '' : 's'}</span>
                 </>
               )}
-              {ratings?.popcornmeter != null && (
+              {isTv && movie.network && (
                 <>
-                  <span className="text-zinc-300">·</span>
-                  <span>🍿 {ratings.popcornmeter}%</span>
+                  <span className="text-zinc-300">•</span>
+                  <span>{movie.network}</span>
                 </>
               )}
-              {ratings?.metacritic != null && (
+              {movie.genres?.[0] && (
                 <>
-                  <span className="text-zinc-300">·</span>
-                  <span>Metascore {ratings.metacritic}</span>
+                  <span className="text-zinc-300">•</span>
+                  <span>{movie.genres.slice(0, 2).join(' / ')}</span>
                 </>
               )}
             </div>
-            {/* 打分 + Watched / Watch Later：移动端居中堆叠，桌面端同行左对齐 */}
-            <div className="mt-3 flex flex-col items-center gap-2 sm:flex-row sm:items-center sm:gap-4 sm:justify-start">
-              <div className="flex flex-wrap items-center justify-center gap-0.5 sm:gap-1">
-                <span className="text-[11px] text-zinc-600 sm:text-xs">My score</span>
-                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => handleRate(n)}
-                    onMouseEnter={() => setHoverRating(n)}
-                    onMouseLeave={() => setHoverRating(0)}
-                    aria-label={`rate ${n}`}
-                    className={`text-xs leading-none transition sm:text-sm ${
-                      n <= (hoverRating || personal) ? 'text-amber-500' : 'text-zinc-300 hover:text-zinc-400'
-                    }`}
-                  >
-                    ★
-                  </button>
-                ))}
-                {personal > 0 && (
-                  <button
-                    onClick={() => changePersonal(0)}
-                    className="ml-1 text-[11px] text-zinc-500 underline hover:text-zinc-700 sm:text-xs"
-                  >
-                    clear
-                  </button>
+
+            {/* 评分卡片 + My Score + Watched/Watch Later */}
+            <div className="mt-4 flex flex-col items-center gap-3 sm:mt-auto sm:flex-row sm:items-end sm:justify-between">
+              {/* 评分卡片：垂直排列，label 在上 value 在下 */}
+              {(() => {
+                const chips = []
+                if (typeof movie.rating === 'number') {
+                  chips.push({ label: isTv ? 'TVmaze' : 'TMDB', value: movie.rating.toFixed(1), icon: '★' })
+                }
+                if (ratings?.imdb != null) {
+                  chips.push({ label: 'IMDb', value: ratings.imdb.toFixed(1) })
+                }
+                if (ratings?.rotten_tomatoes != null) {
+                  chips.push({ label: 'Critics', value: `${ratings.rotten_tomatoes}%`, tone: ratings.rotten_tomatoes >= 60 ? 'green' : 'red' })
+                }
+                if (ratings?.popcornmeter != null) {
+                  chips.push({ label: 'Audience', value: `${ratings.popcornmeter}%`, tone: ratings.popcornmeter >= 60 ? 'green' : 'red' })
+                }
+                if (ratings?.metacritic != null) {
+                  const mc = ratings.metacritic
+                  const mcTone = mc >= 60 ? 'green' : mc >= 40 ? 'amber' : 'red'
+                  chips.push({ label: 'Metascore', value: String(mc), tone: mcTone })
+                }
+                if (chips.length === 0) return null
+                const toneStyles = {
+                  green: { box: 'border-green-200 bg-green-50', text: 'text-green-700' },
+                  amber: { box: 'border-amber-200 bg-amber-50', text: 'text-amber-700' },
+                  red: { box: 'border-red-200 bg-red-50', text: 'text-red-700' },
+                }
+                return (
+                  <div className="flex flex-wrap items-stretch justify-center gap-2 sm:justify-start">
+                    {chips.map((c) => {
+                      const tone = toneStyles[c.tone] || { box: 'border-zinc-200 bg-zinc-50', text: 'text-zinc-900' }
+                      return (
+                        <div
+                          key={c.label}
+                          className={`flex min-w-[68px] flex-col items-center justify-center border px-3 py-2 ${tone.box}`}
+                        >
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                            {c.label}
+                          </span>
+                          <span className={`mt-0.5 text-lg font-extrabold leading-none ${tone.text}`}>
+                            {c.icon && <span className="mr-0.5 text-amber-500">{c.icon}</span>}
+                            {c.value}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
+              {/* 右侧：My Score 在上，Watched/Watch Later 在下，垂直对齐 */}
+              <div className="flex flex-col items-center gap-2">
+                {/* My Score 星级 */}
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">My score</span>
+                  <div className="flex items-center gap-0.5">
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => handleRate(n)}
+                        onMouseEnter={() => setHoverRating(n)}
+                        onMouseLeave={() => setHoverRating(0)}
+                        aria-label={`rate ${n}`}
+                        className={`text-base leading-none transition hover:scale-125 ${
+                          n <= (hoverRating || personal) ? 'text-amber-500' : 'text-zinc-300 hover:text-zinc-400'
+                        }`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  {personal > 0 && (
+                    <button
+                      onClick={() => changePersonal(0)}
+                      className="ml-1 text-xs text-zinc-400 underline transition hover:text-zinc-600"
+                    >
+                      clear
+                    </button>
+                  )}
+                </div>
+                {/* Watched / Watch Later 按钮 */}
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <WatchButton
+                    active={lib.isInWatched(kind, movie.id)}
+                    onClick={() =>
+                      lib.isInWatched(kind, movie.id)
+                        ? lib.removeFromWatched(kind, movie.id)
+                        : lib.addToWatched({ ...movie, ratings }, personal)
+                    }
+                    label="Watched"
+                  />
+                  <WatchButton
+                    active={lib.isInWatchLater(kind, movie.id)}
+                    onClick={() =>
+                      lib.isInWatchLater(kind, movie.id)
+                        ? lib.removeFromWatchLater(kind, movie.id)
+                        : lib.addToWatchLater(movie)
+                    }
+                    label="Watch Later"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 短评区：防抖 500ms 保存到 library */}
+            <div className="mt-5 border-t border-zinc-200 pt-4">
+              <div className="mb-2 flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">My Note</span>
+                {note && (
+                  <span className="text-[10px] text-zinc-400">auto-saved</span>
                 )}
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <WatchButton
-                  active={lib.isInWatched(movie.id)}
-                  onClick={() =>
-                    lib.isInWatched(movie.id)
-                      ? lib.removeFromWatched(movie.id)
-                      : lib.addToWatched(movie, personal)
-                  }
-                  label="Watched"
-                />
-                <WatchButton
-                  active={lib.isInWatchLater(movie.id)}
-                  onClick={() =>
-                    lib.isInWatchLater(movie.id)
-                      ? lib.removeFromWatchLater(movie.id)
-                      : lib.addToWatchLater(movie)
-                  }
-                  label="Watch Later"
-                />
-              </div>
+              <textarea
+                value={note}
+                onChange={(e) => handleNoteChange(e.target.value)}
+                placeholder="Write a short review or note about this title…"
+                rows={3}
+                className="w-full resize-none border border-zinc-300 bg-white p-3 text-sm leading-relaxed text-zinc-800 outline-none transition focus:border-black"
+              />
             </div>
-            {movie.credits?.director && (
-              <p className="mt-2 text-sm text-zinc-700">Director · {movie.credits.director}</p>
-            )}
-            {movie.credits?.cast?.length > 0 && (
-              <p className="mt-1 text-sm text-zinc-700">
-                Starring · {movie.credits.cast.slice(0, 3).map((p) => p.name).join(', ')}
-              </p>
-            )}
-            {specs?.cameras?.length > 0 && (
-              <p className="mt-1 text-sm text-zinc-700">Camera · {specs.cameras.slice(0, 3).join(', ')}</p>
-            )}
-            {specs?.lenses?.length > 0 && (
-              <p className="mt-1 text-sm text-zinc-700">Lenses · {specs.lenses.slice(0, 2).join(', ')}</p>
-            )}
-            {movie.overview && (
-              <p className="mt-4 text-sm leading-relaxed text-zinc-800 sm:line-clamp-4">{movie.overview}</p>
-            )}
           </div>
         </section>
-      )}
+        )
+      })()}
 
+      {/* Description：剧情简介 + 各类信息（导演/演员/技术参数/奖项/类型），不折叠 */}
       {movie && !detailLoading && (() => {
-        // 只属于当前电影的备选海报：排除头部主海报，至多 10 张
+        const isTv = movie.kind === 'tv'
+        const genreSource = isTv ? 'tv' : 'movie'
+        return (
+        <section className="mt-6 border-t border-zinc-200 pt-6 sm:mt-8 sm:pt-8">
+          {movie.overview && (
+            <p className="text-sm leading-relaxed text-zinc-800">{movie.overview}</p>
+          )}
+          <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+            {movie.genres?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Genres</dt>
+                <dd className="text-zinc-800">
+                  {movie.genres.map((g, idx) => (
+                    <button
+                      key={`${g}-${idx}`}
+                      onClick={() => openGenreByName(g, genreSource)}
+                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                    >
+                      {idx > 0 && <span className="text-zinc-400">, </span>}
+                      {g}
+                    </button>
+                  ))}
+                </dd>
+              </div>
+            )}
+            {movie.credits?.director && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Director</dt>
+                <dd className="text-zinc-800">
+                  <button
+                    onClick={() => openPerson({
+                      id: movie.credits.directorId,
+                      name: movie.credits.director,
+                      source: movie.credits.directorId ? 'tmdb' : 'tvmaze',
+                    })}
+                    className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                  >
+                    {movie.credits.director}
+                  </button>
+                </dd>
+              </div>
+            )}
+            {movie.credits?.writers?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Writers</dt>
+                <dd className="text-zinc-800">
+                  {movie.credits.writers.map((name, idx) => (
+                    <button
+                      key={`${name}-${idx}`}
+                      onClick={() => openPerson({
+                        id: movie.credits.writerIds?.[idx],
+                        name,
+                        source: movie.credits.writerIds?.[idx] ? 'tmdb' : 'tvmaze',
+                      })}
+                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                    >
+                      {idx > 0 && <span className="text-zinc-400">, </span>}
+                      {name}
+                    </button>
+                  ))}
+                </dd>
+              </div>
+            )}
+            {movie.credits?.cast?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Starring</dt>
+                <dd className="text-zinc-800">
+                  {movie.credits.cast.slice(0, 5).map((p, idx) => (
+                    <button
+                      key={`${p.id || p.name}-${idx}`}
+                      onClick={() => openPerson({
+                        id: p.id,
+                        name: p.name,
+                        source: isTv ? 'tvmaze' : 'tmdb',
+                      })}
+                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                    >
+                      {idx > 0 && <span className="text-zinc-400">, </span>}
+                      {p.name}
+                      {p.character && (
+                        <span className="text-zinc-500"> ({p.character})</span>
+                      )}
+                    </button>
+                  ))}
+                </dd>
+              </div>
+            )}
+            {specs?.cameras?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Camera</dt>
+                <dd className="text-zinc-800">{specs.cameras.slice(0, 3).join(', ')}</dd>
+              </div>
+            )}
+            {specs?.lenses?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Lenses</dt>
+                <dd className="text-zinc-800">{specs.lenses.slice(0, 2).join(', ')}</dd>
+              </div>
+            )}
+            {specs?.aspectRatios?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Aspect Ratio</dt>
+                <dd className="text-zinc-800">{specs.aspectRatios[0]}</dd>
+              </div>
+            )}
+            {specs?.negativeStocks?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Negative</dt>
+                <dd className="text-zinc-800">{specs.negativeStocks[0]}</dd>
+              </div>
+            )}
+            {specs?.processes?.length > 0 && (
+              <div className="flex gap-2 text-sm">
+                <dt className="shrink-0 font-medium text-zinc-500">Process</dt>
+                <dd className="text-zinc-800">{specs.processes[0]}</dd>
+              </div>
+            )}
+            {ratings?.awards && (
+              <div className="flex gap-2 text-sm sm:col-span-2">
+                <dt className="shrink-0 font-medium text-zinc-500">Awards</dt>
+                <dd className="text-zinc-800">{ratings.awards}</dd>
+              </div>
+            )}
+          </dl>
+        </section>
+        )
+      })()}
+
+      {movie && !detailLoading && movie.kind !== 'tv' && (() => {
         const altPosters = posters
           .filter((p) => p.file_path !== movie.poster_path)
           .slice(0, 10)
+        const total = altPosters.length + backdrops.length
         return (
-          <CollapsibleSection title="Posters" count={altPosters.length} defaultOpen>
-            {imagesLoading ? (
-              <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                Loading posters…
-              </div>
-            ) : altPosters.length === 0 ? (
-              <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                No alternative posters available for this movie.
-              </div>
-            ) : (
-              <>
-                <p className="mb-3 text-xs text-zinc-700">Tap a poster to use it on your generated card.</p>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3">
-                  {altPosters.map((p, i) => {
-                    const thumb = apiUrl(`/api/image?path=${encodeURIComponent(p.file_path)}&s=w342`)
-                    const full = apiUrl(`/api/image?path=${encodeURIComponent(p.file_path)}&s=w780`)
-                    const isSelected = cardImage === full
-                    return (
-                      <div
-                        key={p.file_path || i}
-                        className={`group relative aspect-[2/3] overflow-hidden bg-zinc-100 transition ${
-                          isSelected ? 'ring-2 ring-black ring-offset-2' : ''
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setCardImage(isSelected ? null : full)}
-                          className="absolute inset-0 h-full w-full"
-                          aria-label={isSelected ? 'Remove poster from card' : 'Use this poster on card'}
-                        >
-                          <img
-                            src={thumb}
-                            alt={`${movie.title} poster ${i + 1}`}
-                            loading="lazy"
-                            crossOrigin="anonymous"
-                            className="h-full w-full object-cover transition group-hover:scale-105"
-                          />
-                        </button>
-
-                        {/* 放大预览（不影响选图） */}
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); setActivePoster(full) }}
-                          aria-label="Preview poster"
-                          className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
-                        >
-                          <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <polyline points="15 3 21 3 21 9" />
-                            <polyline points="9 21 3 21 3 15" />
-                            <line x1="21" y1="3" x2="14" y2="10" />
-                            <line x1="3" y1="21" x2="10" y2="14" />
-                          </svg>
-                        </button>
-
-                        {isSelected && (
-                          <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                            On card
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
+          <CollapsibleSection title="Posters & Backdrops" count={total}>
+            {/* Posters */}
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Posters</h3>
+              {imagesLoading ? (
+                <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+                  Loading posters…
                 </div>
-              </>
-            )}
+              ) : altPosters.length === 0 ? (
+                <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
+                  No alternative posters available.
+                </div>
+              ) : (
+                <>
+                  <p className="mb-3 text-xs text-zinc-700">Tap a poster to use it on your generated card.</p>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3">
+                    {altPosters.map((p, i) => {
+                      const thumb = apiUrl(`/api/image?path=${encodeURIComponent(p.file_path)}&s=w342`)
+                      const full = apiUrl(`/api/image?path=${encodeURIComponent(p.file_path)}&s=w780`)
+                      const isSelected = cardImage === full
+                      return (
+                        <div
+                          key={p.file_path || i}
+                          className={`group relative aspect-[2/3] overflow-hidden bg-zinc-100 transition ${
+                            isSelected ? 'ring-2 ring-black ring-offset-2' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setCardImage(isSelected ? null : full)}
+                            className="absolute inset-0 h-full w-full"
+                            aria-label={isSelected ? 'Remove poster from card' : 'Use this poster on card'}
+                          >
+                            <img
+                              src={thumb}
+                              alt={`${movie.title} poster ${i + 1}`}
+                              loading="lazy"
+                              crossOrigin="anonymous"
+                              className="h-full w-full object-cover transition group-hover:scale-105"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setActivePoster(full) }}
+                            aria-label="Preview poster"
+                            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
+                          >
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <polyline points="15 3 21 3 21 9" />
+                              <polyline points="9 21 3 21 3 15" />
+                              <line x1="21" y1="3" x2="14" y2="10" />
+                              <line x1="3" y1="21" x2="10" y2="14" />
+                            </svg>
+                          </button>
+                          {isSelected && (
+                            <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
+                              On card
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Backdrops */}
+            <div className="mt-6">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Backdrops</h3>
+              {imagesLoading ? (
+                <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
+                  Loading backdrops…
+                </div>
+              ) : backdrops.length === 0 ? (
+                <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
+                  No backdrops available.
+                </div>
+              ) : (
+                <>
+                  <p className="mb-3 text-xs text-zinc-700">Tap a backdrop to use it on your generated card.</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+                    {backdrops.map((b, i) => {
+                      const thumb = apiUrl(`/api/image?path=${encodeURIComponent(b.file_path)}&s=w780`)
+                      const full = apiUrl(`/api/image?path=${encodeURIComponent(b.file_path)}&s=w1280`)
+                      const isSelected = cardImage === full
+                      return (
+                        <div
+                          key={b.file_path || i}
+                          className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
+                            isSelected ? 'ring-2 ring-black ring-offset-2' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setCardImage(isSelected ? null : full)}
+                            className="absolute inset-0 h-full w-full"
+                            aria-label={isSelected ? 'Remove backdrop from card' : 'Use this backdrop on card'}
+                          >
+                            <img
+                              src={thumb}
+                              alt={`${movie.title} backdrop ${i + 1}`}
+                              loading="lazy"
+                              crossOrigin="anonymous"
+                              className="h-full w-full object-cover transition group-hover:scale-105"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setActiveBackdrop(full) }}
+                            aria-label="Preview backdrop"
+                            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
+                          >
+                            <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <polyline points="15 3 21 3 21 9" />
+                              <polyline points="9 21 3 21 3 15" />
+                              <line x1="21" y1="3" x2="14" y2="10" />
+                              <line x1="3" y1="21" x2="10" y2="14" />
+                            </svg>
+                          </button>
+                          {isSelected && (
+                            <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
+                              On card
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
           </CollapsibleSection>
         )
       })()}
@@ -825,75 +1400,6 @@ export default function App() {
         </div>
       )}
 
-      {movie && !detailLoading && (
-        <CollapsibleSection title="Backdrops" count={backdrops.length}>
-          {imagesLoading ? (
-              <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                Loading backdrops…
-              </div>
-            ) : backdrops.length === 0 ? (
-              <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                No backdrops available for this movie.
-              </div>
-            ) : (
-              <>
-                <p className="mb-3 text-xs text-zinc-700">Tap a backdrop to use it on your generated card.</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
-                {backdrops.map((b, i) => {
-                  const thumb = apiUrl(`/api/image?path=${encodeURIComponent(b.file_path)}&s=w780`)
-                  const full = apiUrl(`/api/image?path=${encodeURIComponent(b.file_path)}&s=w1280`)
-                  const isSelected = cardImage === full
-                  return (
-                    <div
-                      key={b.file_path || i}
-                      className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
-                        isSelected ? 'ring-2 ring-black ring-offset-2' : ''
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setCardImage(isSelected ? null : full)}
-                        className="absolute inset-0 h-full w-full"
-                        aria-label={isSelected ? 'Remove backdrop from card' : 'Use this backdrop on card'}
-                      >
-                        <img
-                          src={thumb}
-                          alt={`${movie.title} backdrop ${i + 1}`}
-                          loading="lazy"
-                          crossOrigin="anonymous"
-                          className="h-full w-full object-cover transition group-hover:scale-105"
-                        />
-                      </button>
-
-                      {/* 放大预览（不影响选图） */}
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); setActiveBackdrop(full) }}
-                        aria-label="Preview backdrop"
-                        className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
-                      >
-                        <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <polyline points="15 3 21 3 21 9" />
-                          <polyline points="9 21 3 21 3 15" />
-                          <line x1="21" y1="3" x2="14" y2="10" />
-                          <line x1="3" y1="21" x2="10" y2="14" />
-                        </svg>
-                      </button>
-
-                      {isSelected && (
-                        <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                          On card
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-                </div>
-              </>
-            )}
-        </CollapsibleSection>
-      )}
-
       {activeBackdrop != null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
@@ -920,6 +1426,24 @@ export default function App() {
         </div>
       )}
 
+      {movie && !detailLoading && movie.kind === 'tv' && (
+        <ShowEpisodes
+          key={`episodes-${movie.id}`}
+          show={movie}
+          cardImage={cardImage}
+          onSelectCardImage={setCardImage}
+        />
+      )}
+
+      {movie && !detailLoading && movie.kind === 'tv' && (
+        <TvBackdrops
+          key={`backdrops-${movie.id}`}
+          show={movie}
+          selected={cardImage}
+          onSelect={setCardImage}
+        />
+      )}
+
       {movie && !detailLoading && (
         <TrailerSection key={`trailer-${movie.id}`} movie={movie} />
       )}
@@ -929,10 +1453,27 @@ export default function App() {
       )}
 
       {movie && !detailLoading && (
-        <Torrents key={`torrents-${movie.id}`} movie={movie} />
+        <CollapsibleSection title="Recommendations">
+          <TasteDiveSimilar
+            key={`similar-${movie.id}`}
+            movie={movie}
+            embed
+            onSelect={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
+          />
+          <AlsoLiked
+            key={`liked-${movie.id}`}
+            movie={movie}
+            embed
+            onSelect={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
+          />
+        </CollapsibleSection>
       )}
 
       {movie && !detailLoading && (
+        <Torrents key={`torrents-${movie.id}`} movie={movie} />
+      )}
+
+      {movie && !detailLoading && movie.kind !== 'tv' && (
         <FilmGrabShots
           key={movie.id}
           movie={movie}
@@ -952,6 +1493,7 @@ export default function App() {
           onPersonal={changePersonal}
           cardImage={cardImage}
           onClearCardImage={() => setCardImage(null)}
+          note={note}
         />
       )}
 

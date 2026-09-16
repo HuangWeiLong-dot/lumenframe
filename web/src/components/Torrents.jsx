@@ -6,13 +6,12 @@ import { FILMGRAB_BASE } from '../api'
 // 公网经 Nginx /filmgrab -> /api 重写）；未配置服务时显示未配置提示。
 const ENABLED = FILMGRAB_BASE !== ''
 
-// 电影向站点：并行查询、单点失败不影响其它站点。
-// YTS 一个条目内嵌多清晰度 torrents[]，其余站点字段基本统一。
+// 电影向站点：仅保留实测可用的站点（其余站点被 Cloudflare 封锁或无结果）
+// piratebay / ybt / nyaasi 为当前 Clash 节点下可连通的站点
 const SITES = [
-  { id: 'yts', label: 'YTS' },
   { id: 'piratebay', label: 'Pirate Bay' },
-  { id: '1337x', label: '1337x' },
-  { id: 'tgx', label: 'TorrentGalaxy' },
+  { id: 'ybt', label: 'YBT' },
+  { id: 'nyaasi', label: 'Nyaa' },
 ]
 
 const PER_SITE_LIMIT = 20
@@ -121,7 +120,61 @@ function ExternalIcon({ className }) {
   )
 }
 
+function CopyIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="14" height="14" x="8" y="8" rx="0" ry="0" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+// 非安全上下文（http、部分内嵌 WebView）下 navigator.clipboard 不可用，用 textarea + execCommand 兜底
+async function copyToClipboard(text) {
+  try {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // 继续走降级路径
+  }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.top = '-9999px'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
 function TorrentRow({ row }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    if (!row.magnet) return
+    const ok = await copyToClipboard(row.magnet)
+    if (!ok) return
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
     <div className="flex items-start gap-3 border border-zinc-200 px-3 py-2.5 transition hover:border-zinc-400 hover:bg-zinc-50">
       <div className="min-w-0 flex-1">
@@ -163,6 +216,21 @@ function TorrentRow({ row }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
+        {row.magnet && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            title={copied ? 'Magnet link copied' : 'Copy magnet link'}
+            aria-label={copied ? 'Magnet link copied' : 'Copy magnet link'}
+            className={`flex h-8 w-8 items-center justify-center border transition ${
+              copied
+                ? 'border-black bg-black text-white'
+                : 'border-zinc-300 text-zinc-700 hover:border-black hover:bg-black hover:text-white'
+            }`}
+          >
+            {copied ? <CheckIcon className="h-4 w-4" /> : <CopyIcon className="h-4 w-4" />}
+          </button>
+        )}
         {row.magnet ? (
           <a
             href={row.magnet}
@@ -200,6 +268,7 @@ function TorrentRow({ row }) {
 export default function Torrents({ movie }) {
   const title = movie?.title
   const year = movie?.year || ''
+  const isTv = movie?.kind === 'tv'
   const [rows, setRows] = useState([])
   const [status, setStatus] = useState('loading') // loading | done | error
   const [filter, setFilter] = useState('all')
@@ -212,7 +281,8 @@ export default function Torrents({ movie }) {
     setRows([])
     setFilter('all')
 
-    const query = year ? `${title} ${year}` : title
+    // 电影：剧名 + 年份；剧集：只用剧名（多季，加首播年份反而限制结果）
+    const query = isTv ? title : (year ? `${title} ${year}` : title)
     const timer = setTimeout(() => {
       Promise.allSettled(SITES.map((s) => searchSite(s.id, query))).then((results) => {
         if (!alive) return
@@ -243,7 +313,7 @@ export default function Torrents({ movie }) {
       alive = false
       clearTimeout(timer)
     }
-  }, [title, year, nonce])
+  }, [title, year, isTv, nonce])
 
   const siteCounts = useMemo(() => {
     const counts = { all: rows.length }
