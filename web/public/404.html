@@ -22,7 +22,7 @@
         // 自定义域名根路径 '/'、以及 hash 部署等）。
         // 策略：遇到 movie/ /library /library/xxx /assets 等已知段就截断到它之前。
         function detectRoot(path) {
-          var KNOWN = ['movie/', 'library', 'assets', 'api/', 'filmgrab', 'card-studio']
+          var KNOWN = ['movie/', 'tv/', 'person/', 'genre/', 'library', 'assets', 'api/', 'filmgrab', 'card-studio']
           for (var i = 0; i < KNOWN.length; i++) {
             var k = KNOWN[i]
             var idx = path.indexOf('/' + k)
