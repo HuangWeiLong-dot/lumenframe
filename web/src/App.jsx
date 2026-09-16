@@ -7,7 +7,6 @@ import FilmGrabShots from './components/FilmGrabShots'
 import TrailerSection from './components/TrailerSection'
 import WhereToWatch from './components/WhereToWatch'
 import Torrents from './components/Torrents'
-import Subtitles from './components/Subtitles'
 import TasteDiveSimilar from './components/TasteDiveSimilar'
 import AlsoLiked from './components/AlsoLiked'
 import SmartImage from './components/SmartImage'
@@ -1492,10 +1491,6 @@ export default function App() {
 
       {movie && !detailLoading && (
         <Torrents key={`torrents-${movie.id}`} movie={movie} />
-      )}
-
-      {movie && !detailLoading && movie.imdb_id && (
-        <Subtitles key={`subs-${movie.id}`} movie={movie} />
       )}
 
       {movie && !detailLoading && movie.kind !== 'tv' && (

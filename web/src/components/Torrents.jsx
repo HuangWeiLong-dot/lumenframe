@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
+import Subtitles from './Subtitles'
 import { FILMGRAB_BASE } from '../api'
 
 // 走 FilmGrab FastAPI 的 /api/torrent/v1（本地经 Vite /filmgrab 代理，
@@ -402,6 +403,9 @@ export default function Torrents({ movie }) {
           </p>
         </>
       )}
+
+      {/* 字幕下载 */}
+      <Subtitles embed movie={movie} />
     </CollapsibleSection>
   )
 }

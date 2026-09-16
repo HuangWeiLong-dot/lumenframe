@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import CollapsibleSection from './CollapsibleSection'
 import { apiUrl } from '../api'
 
 const LANGS = [
@@ -17,7 +16,7 @@ const LANGS = [
   { code: 'hin', label: 'Hindi' },
 ]
 
-export default function Subtitles({ movie }) {
+export default function Subtitles({ movie, embed }) {
   const [lang, setLang] = useState('eng')
   const [season, setSeason] = useState('')
   const [episode, setEpisode] = useState('')
@@ -60,8 +59,8 @@ export default function Subtitles({ movie }) {
 
   if (!imdbId) return null
 
-  return (
-    <CollapsibleSection title="Subtitles" count={results.length}>
+  const content = (
+    <>
       {/* 控制行 */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         {/* 语言选择 */}
@@ -159,6 +158,17 @@ export default function Subtitles({ movie }) {
 
       {/* 数据来源 */}
       <p className="mt-3 text-xs text-zinc-400">Subtitle data from OpenSubtitles.org</p>
-    </CollapsibleSection>
+    </>
   )
+
+  if (embed) {
+    return (
+      <div className="mt-6">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Subtitles {results.length > 0 && `(${results.length})`}</h3>
+        {content}
+      </div>
+    )
+  }
+
+  return content
 }
