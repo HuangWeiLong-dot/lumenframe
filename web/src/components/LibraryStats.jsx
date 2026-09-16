@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from 'react'
+import { useEffect, useRef, useMemo, useState } from 'react'
 import Chart from 'chart.js/auto'
 import { posterFor } from '../api'
 import SmartImage from './SmartImage'
@@ -104,7 +104,24 @@ function ChartCard({ title, children, span = 1, hasData = true }) {
   )
 }
 
-export default function LibraryStats({ watched }) {
+export default function LibraryStats({ watched, onRefreshRatings }) {
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState('')
+
+  const handleRefresh = async () => {
+    if (refreshing || !onRefreshRatings) return
+    setRefreshing(true)
+    setRefreshMsg('Starting...')
+    await onRefreshRatings(({ done, total, msg }) => {
+      if (total > 0) setRefreshMsg(`${done}/${total} — ${msg}`)
+      else setRefreshMsg(msg)
+    })
+    setRefreshing(false)
+    setTimeout(() => setRefreshMsg(''), 5000)
+  }
+
+  const missingRatings = watched.filter((m) => !m.ratings && m.kind !== 'tv').length
+
   if (watched.length < 3) {
     return (
       <div className="border border-dashed border-zinc-300 py-12 text-center">
@@ -317,6 +334,29 @@ export default function LibraryStats({ watched }) {
 
   return (
     <>
+      {/* Refresh ratings bar */}
+      {missingRatings > 0 && onRefreshRatings && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium text-zinc-700">
+              {missingRatings} movie{missingRatings > 1 ? 's' : ''} missing external ratings
+            </span>
+            {refreshMsg && <span className="text-xs text-zinc-500">{refreshMsg}</span>}
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className={`border px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
+              refreshing
+                ? 'border-zinc-200 bg-zinc-100 text-zinc-400'
+                : 'border-black bg-black text-white hover:bg-zinc-800'
+            }`}
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh Ratings'}
+          </button>
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Titles" value={watched.length} sub={`${movies.length} films · ${shows.length} shows`} />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { posterFor } from '../api'
+import { posterFor, apiUrl } from '../api'
 import { useLibrary } from '../hooks/useLibrary'
 import LibraryStats from './LibraryStats'
 import SmartImage from './SmartImage'
@@ -79,7 +79,7 @@ function TitleCard({ item, list, onOpen, onRemove }) {
 
 export default function LibraryPage({ onOpenTitle, onGoHome }) {
   const [tab, setTab] = useState('watched')
-  const { watched, watchlater, removeFromWatched, removeFromWatchLater } = useLibrary()
+  const { watched, watchlater, removeFromWatched, removeFromWatchLater, refreshAllRatings } = useLibrary()
 
   const tabs = [
     { id: 'watched', label: 'Watched', count: watched.length },
@@ -134,7 +134,7 @@ export default function LibraryPage({ onOpenTitle, onGoHome }) {
       {/* Content */}
       <div className="mt-6">
         {tab === 'stats' ? (
-          <LibraryStats watched={watched} />
+          <LibraryStats watched={watched} onRefreshRatings={(onProgress) => refreshAllRatings(apiUrl, onProgress)} />
         ) : items.length === 0 ? (
           <div className="border border-dashed border-zinc-300 py-16 text-center">
             <p className="text-sm text-zinc-500">

@@ -102,9 +102,10 @@ function toEntry(movie, myRating = 0) {
     original_title: movie.original_title,
     poster_path: movie.poster_path,
     runtime: movie.runtime || null,
+    imdb_id: movie.imdb_id || null,
     director: movie.credits?.director || null,
     writers: movie.credits?.writers || [],
-    cast: (movie.credits?.cast || []).map((p) => ({ id: p.id, name: p.name })),
+    cast: movie.credits?.cast || [].map((p) => ({ id: p.id, name: p.name })),
   }
 }
 
@@ -199,6 +200,56 @@ export function useLibrary() {
     emit()
   }, [cache])
 
+  // 批量刷新评分：找出 watched 中没有 ratings 的条目，逐个拉取
+  const refreshAllRatings = useCallback(async (apiUrlFn, onProgress) => {
+    const needRatings = cache.watched.filter((m) => !m.ratings)
+    if (needRatings.length === 0) {
+      onProgress?.({ done: 0, total: 0, msg: 'All ratings up to date' })
+      return
+    }
+    let done = 0
+    for (const m of needRatings) {
+      try {
+        // 先获取 imdb_id（如果条目没有的话）
+        let imdbId = m.imdb_id
+        if (!imdbId) {
+          if (m.kind === 'tv') {
+            // TV 没有 imdb_id，跳过
+            done++
+            onProgress?.({ done, total: needRatings.length, msg: `Skipped ${m.title} (TV)` })
+            continue
+          }
+          const detailRes = await fetch(apiUrlFn(`/api/movie/${m.id}`))
+          if (detailRes.ok) {
+            const detail = await detailRes.json()
+            imdbId = detail.imdb_id
+          }
+        }
+        if (!imdbId) {
+          done++
+          onProgress?.({ done, total: needRatings.length, msg: `Skipped ${m.title} (no IMDb id)` })
+          continue
+        }
+        const r = await fetch(apiUrlFn(`/api/ratings/${imdbId}?title=${encodeURIComponent(m.title)}&year=${m.year || ''}`))
+        if (r.ok) {
+          const data = await r.json()
+          const key = entryKey(m.kind, m.id)
+          const next = { ...cache, watched: cache.watched.map((w) =>
+            entryKey(w.kind, w.id) === key ? { ...w, ratings: data, imdb_id: imdbId } : w
+          )}
+          write(next)
+        }
+      } catch {
+        // 单个失败不影响整体
+      }
+      done++
+      onProgress?.({ done, total: needRatings.length, msg: `Updated ${m.title}` })
+      // 请求间隔避免 API 限流
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    onProgress?.({ done, total: needRatings.length, msg: 'Refresh complete' })
+  }, [cache])
+
   return {
     watched: store.watched,
     watchlater: store.watchlater,
@@ -210,6 +261,7 @@ export function useLibrary() {
     isInWatchLater,
     updateMyRating,
     updateRatings,
+    refreshAllRatings,
     getNote,
     setNote,
   }
