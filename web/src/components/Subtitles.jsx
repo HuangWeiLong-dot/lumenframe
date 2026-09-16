@@ -36,14 +36,6 @@ function SubtitleRow({ sub }) {
           {sub.hearingImpaired && (
             <span className="border border-zinc-300 px-1.5 py-0.5 text-[10px] font-bold uppercase">HI</span>
           )}
-          {sub.rating > 0 && (
-            <span className="inline-flex items-center gap-0.5 font-medium text-amber-600">
-              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
-              </svg>
-              {sub.rating.toFixed(1)}
-            </span>
-          )}
           {sub.downloads > 0 && (
             <span className="inline-flex items-center gap-0.5 text-zinc-400">
               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
