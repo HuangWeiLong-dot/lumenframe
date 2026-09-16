@@ -1,16 +1,42 @@
 // TVmaze（剧集元数据，免费、无需 API key）
-// 文档：https://api.tvmaze.com ；官方要求请求带可识别的 User-Agent。
-// 直接使用全局 fetch（Node 20 内置），不自定义 Agent，避免 undici 连接问题。
-// 如需代理，在 index.js 中 setGlobalDispatcher 即可全局生效。
+// 使用 Node.js 原生 https 模块，绕过 undici fetch（避免 IPv6/proxy 兼容问题）
+// 与 curl 使用相同的系统网络栈，连通性一致
+import https from 'node:https'
 
-const BASE = 'https://api.tvmaze.com'
+const BASE = 'api.tvmaze.com'
 const IMG_HOST = 'static.tvmaze.com'
 const UA = 'Lumenframe/1.0 (movie & tv metadata app; https://github.com/lumenframe)'
 
-async function tvmaze(pathname) {
-  const r = await fetch(BASE + pathname, {
-    headers: { 'User-Agent': UA, Accept: 'application/json' },
+function httpsGet(pathname, host = BASE) {
+  return new Promise((resolve, reject) => {
+    const req = https.get({
+      host,
+      path: pathname,
+      port: 443,
+      family: 4, // 强制 IPv4
+      headers: { 'User-Agent': UA, Accept: 'application/json' },
+      timeout: 15000,
+    }, (res) => {
+      const chunks = []
+      res.on('data', (c) => chunks.push(c))
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString()
+        resolve({
+          status: res.statusCode,
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          body,
+          json: () => JSON.parse(body),
+          headers: res.headers,
+        })
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => req.destroy(new Error('tvmaze timeout')))
   })
+}
+
+async function tvmaze(pathname) {
+  const r = await httpsGet(pathname)
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`tvmaze ${r.status}`)
   return r.json()
@@ -64,7 +90,6 @@ export async function getShow(id) {
   const rawSeasons = embedded.seasons || []
   const episodes = (embedded.episodes || []).filter((e) => e.season >= 1)
 
-  // 以实际分集为准回填每季集数（episodeOrder 对在播季常为 null）
   const countBySeason = new Map()
   for (const e of episodes) {
     countBySeason.set(e.season, (countBySeason.get(e.season) || 0) + 1)
@@ -122,7 +147,6 @@ export async function getShow(id) {
   }
 }
 
-// 全部分集：/shows/:id/episodes
 export async function getEpisodes(id) {
   const data = await tvmaze(`/shows/${id}/episodes`)
   if (!data) return []
@@ -139,8 +163,7 @@ export async function getEpisodes(id) {
     }))
 }
 
-// 校验并代理 static.tvmaze.com 图片（海报/分集缩略图）
-// 只允许 /uploads/ 下的图片路径，杜绝被当成开放代理
+// 校验并代理 static.tvmaze.com 图片
 export function parseTvImageUrl(raw) {
   let u
   try {
@@ -155,12 +178,11 @@ export function parseTvImageUrl(raw) {
 }
 
 export async function fetchTvImage(u) {
-  const r = await fetch(u, {
-    headers: { 'User-Agent': UA, Accept: 'image/*' },
-  })
+  const url = new URL(u)
+  const r = await httpsGet(url.pathname + url.search, url.host)
   if (!r.ok) throw new Error(`tvmaze image ${r.status}`)
   return {
-    buf: Buffer.from(await r.arrayBuffer()),
-    contentType: r.headers.get('content-type') || 'image/jpeg',
+    buf: Buffer.from(r.body, 'binary'),
+    contentType: r.headers['content-type'] || 'image/jpeg',
   }
 }
