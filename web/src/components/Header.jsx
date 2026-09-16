@@ -20,6 +20,7 @@ const API_SOURCES = [
   { name: 'TasteDive API', url: 'https://tastedive.com/api/v1/' },
   { name: 'YouTube Data API', url: 'https://developers.google.com/youtube/v3' },
   { name: 'Torrent API', url: 'https://github.com/Ryuk-me/Torrent-Api-py' },
+  { name: 'OpenSubtitles API', url: 'https://trac.opensubtitles.org/wiki/DevReadLine' },
   { name: 'ShotOnWhat?', url: 'https://shotonwhat.com' },
 ]
 

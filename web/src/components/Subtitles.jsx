@@ -16,6 +16,59 @@ const LANGS = [
   { code: 'hin', label: 'Hindi' },
 ]
 
+function DownloadIcon({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function SubtitleRow({ sub }) {
+  return (
+    <div className="flex items-start gap-3 border border-zinc-200 px-3 py-2.5 transition hover:border-zinc-400 hover:bg-zinc-50">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-zinc-900" title={sub.filename}>{sub.filename}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+          <span className="font-semibold text-zinc-600">{sub.lang}</span>
+          {sub.hearingImpaired && (
+            <span className="border border-zinc-300 px-1.5 py-0.5 text-[10px] font-bold uppercase">HI</span>
+          )}
+          {sub.rating > 0 && (
+            <span className="inline-flex items-center gap-0.5 font-medium text-amber-600">
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" />
+              </svg>
+              {sub.rating.toFixed(1)}
+            </span>
+          )}
+          {sub.downloads > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-zinc-400">
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14" /><path d="m19 12-7 7-7-7" />
+              </svg>
+              {sub.downloads.toLocaleString()}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <a
+          href={apiUrl(`/api/subtitle/download?url=${encodeURIComponent(sub.downloadUrl)}`)}
+          download
+          title="Download subtitle"
+          aria-label="Download subtitle"
+          className="flex h-8 w-8 items-center justify-center border border-zinc-300 text-zinc-700 transition hover:border-black hover:bg-black hover:text-white"
+        >
+          <DownloadIcon className="h-4 w-4" />
+        </a>
+      </div>
+    </div>
+  )
+}
+
 export default function Subtitles({ movie, embed }) {
   const [lang, setLang] = useState('eng')
   const [season, setSeason] = useState('')
@@ -27,7 +80,6 @@ export default function Subtitles({ movie, embed }) {
 
   const isTv = movie?.kind === 'tv'
   const imdbId = movie?.imdb_id
-
   const seasons = isTv && movie?.seasons ? movie.seasons : []
 
   useEffect(() => {
@@ -62,8 +114,7 @@ export default function Subtitles({ movie, embed }) {
   const content = (
     <>
       {/* 控制行 */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        {/* 语言选择 */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Lang</label>
           <select
@@ -77,7 +128,6 @@ export default function Subtitles({ movie, embed }) {
           </select>
         </div>
 
-        {/* TV: 季/集选择 */}
         {isTv && seasons.length > 0 && (
           <div className="flex items-center gap-2">
             <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Season</label>
@@ -107,57 +157,35 @@ export default function Subtitles({ movie, embed }) {
         )}
       </div>
 
-      {/* 加载中 */}
       {loading && (
-        <div className="flex items-center gap-2 py-3 text-sm text-zinc-500">
-          <div className="h-4 w-4 animate-spin border-2 border-zinc-300 border-t-black"></div>
-          Searching subtitles...
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
+          Searching subtitles…
         </div>
       )}
 
-      {/* 错误 */}
       {error && (
-        <div className="py-3 text-sm text-red-600">{error}</div>
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
+          {error}
+        </div>
       )}
 
-      {/* 无结果 */}
       {!loading && !error && fetched && results.length === 0 && (
-        <div className="py-3 text-sm text-zinc-500">No {LANGS.find(l => l.code === lang)?.label || ''} subtitles found.</div>
+        <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
+          No {LANGS.find(l => l.code === lang)?.label || ''} subtitles found.
+        </div>
       )}
 
-      {/* 字幕列表 */}
       {!loading && results.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {results.map((s, i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between gap-3 border border-zinc-200 bg-white px-3 py-2 hover:border-zinc-300"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-zinc-800">{s.filename}</p>
-                <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500">
-                  <span>{s.lang}</span>
-                  {s.hearingImpaired && (
-                    <span className="border border-zinc-300 px-1 text-[10px] uppercase">HI</span>
-                  )}
-                  {s.rating > 0 && <span>★ {s.rating.toFixed(1)}</span>}
-                  <span>↓ {s.downloads.toLocaleString()}</span>
-                </div>
-              </div>
-              <a
-                href={apiUrl(`/api/subtitle/download?url=${encodeURIComponent(s.downloadUrl)}`)}
-                download
-                className="border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:border-black hover:bg-black hover:text-white"
-              >
-                Download
-              </a>
-            </div>
+            <SubtitleRow key={i} sub={s} />
           ))}
         </div>
       )}
 
-      {/* 数据来源 */}
-      <p className="mt-3 text-xs text-zinc-400">Subtitle data from OpenSubtitles.org</p>
+      <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
+        Subtitle data from OpenSubtitles.org
+      </p>
     </>
   )
 
