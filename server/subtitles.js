@@ -1,6 +1,6 @@
 // OpenSubtitles REST API（无需 API key，只需 User-Agent）
 // 文档：https://trac.opensubtitles.org/wiki/DevReadLine
-// 搜索：GET https://rest.opensubtitles.org/search/imdbid:xxx[/season:y/episode:z]/sublanguageid:eng
+// 搜索：GET https://rest.opensubtitles.org/search/imdbid-xxx/season-y/episode-z/sublanguageid-eng
 // 下载链接 SubDownloadLink 返回 gzip 压缩的 .srt，需 gunzip
 
 import https from 'node:https'
@@ -41,26 +41,9 @@ function httpsGet(pathname) {
   })
 }
 
-// 按 IMDB ID 搜索字幕
-// imdbId 不带 tt 前缀
-export async function searchSubtitles(imdbId, season, episode, lang) {
-  const key = `subs:${imdbId}:${season || ''}:${episode || ''}:${lang || ''}`
-  const hit = cache.get(key)
-  if (hit && Date.now() - hit.t < CACHE_TTL) return hit.data
-
-  let path = `/search/imdbid-${imdbId}`
-  if (season) path += `/season-${season}`
-  if (episode) path += `/episode-${episode}`
-  if (lang) path += `/sublanguageid-${lang}`
-
-  const r = await httpsGet(path)
-  if (!r.ok) {
-    if (r.status === 429) throw new Error('OpenSubtitles rate limit, try later')
-    throw new Error(`OpenSubtitles ${r.status}`)
-  }
-
-  const data = r.json()
-  const results = (Array.isArray(data) ? data : []).map((s) => ({
+// 解析 OpenSubtitles 返回结果
+function parseResults(data) {
+  return (Array.isArray(data) ? data : []).map((s) => ({
     filename: s.MovieReleaseName || s.SubFileName || 'unknown.srt',
     lang: s.LanguageName || 'Unknown',
     langCode: s.SubLanguageID || '',
@@ -70,6 +53,51 @@ export async function searchSubtitles(imdbId, season, episode, lang) {
     hearingImpaired: s.SubHearingImpaired === '1',
     encoding: s.SubEncoding || 'UTF-8',
   }))
+}
+
+// 按 IMDB ID 搜索字幕
+// imdbId 不带 tt 前缀
+export async function searchSubtitles(imdbId, season, episode, lang, query) {
+  const paddedId = String(imdbId || '').replace(/^tt/, '').padStart(7, '0')
+  const key = `subs:v3:${paddedId}:${season || ''}:${episode || ''}:${lang || ''}:${query || ''}`
+  const hit = cache.get(key)
+  if (hit && Date.now() - hit.t < CACHE_TTL) return hit.data
+
+  let results = []
+
+  // 优先用 IMDB ID 搜索（独立路径段格式）
+  if (paddedId) {
+    let path = `/search/imdbid-${paddedId}`
+    if (season) path += `/season-${season}`
+    if (episode) path += `/episode-${episode}`
+    if (lang) path += `/sublanguageid-${lang}`
+
+    try {
+      const r = await httpsGet(path)
+      if (r.ok) {
+        results = parseResults(r.json())
+      }
+    } catch (e) {
+      // 忽略，走 fallback
+    }
+  }
+
+  // fallback：用剧名搜索
+  if (results.length === 0 && query) {
+    let path = `/search/query-${encodeURIComponent(query)}`
+    if (season) path += `/season-${season}`
+    if (episode) path += `/episode-${episode}`
+    if (lang) path += `/sublanguageid-${lang}`
+
+    try {
+      const r = await httpsGet(path)
+      if (r.ok) {
+        results = parseResults(r.json())
+      }
+    } catch (e) {
+      // 忽略
+    }
+  }
 
   cache.set(key, { data: results, t: Date.now() })
   return results

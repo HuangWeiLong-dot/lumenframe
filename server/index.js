@@ -389,15 +389,18 @@ app.get('/api/genre/:kind/:id', async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1)
   if (!genreId) return res.status(400).json({ error: 'invalid genre id' })
   try {
-    const data = await cached(`genre:${kind}:${genreId}:p${page}`, () =>
+    // 客户端每页 10 条，TMDB 每页 20 条 → 拆分取半
+    const tmdbPage = Math.ceil(page / 2)
+    const isFirstHalf = page % 2 === 1
+    const data = await cached(`genre:${kind}:${genreId}:p${tmdbPage}`, () =>
       tmdb(`/discover/${kind}`, {
         with_genres: genreId,
         sort_by: 'popularity.desc',
-        page,
+        page: tmdbPage,
         'vote_count.gte': kind === 'tv' ? 50 : 100,
       })
     )
-    const items = (data.results || [])
+    const allItems = (data.results || [])
       .filter((m) => m.poster_path)
       .map((m) => ({
         id: m.id,
@@ -407,9 +410,10 @@ app.get('/api/genre/:kind/:id', async (req, res) => {
         poster_path: m.poster_path,
         overview: m.overview || '',
       }))
+    const items = allItems.slice(isFirstHalf ? 0 : 10, isFirstHalf ? 10 : 20)
     res.json({
-      page: data.page,
-      total_pages: data.total_pages,
+      page,
+      total_pages: Math.ceil((data.total_results || 0) / 10),
       total_results: data.total_results,
       items,
     })
@@ -586,7 +590,7 @@ app.get('/api/similar/:tmdbId', async (req, res) => {
       })
       const picks = (data.results || [])
         .filter((m) => m.poster_path && String(m.id) !== String(id))
-        .slice(0, 12)
+        .slice(0, 5)
         .map((m) => ({
           tmdb_id: m.id,
           title: m.title,
@@ -596,7 +600,7 @@ app.get('/api/similar/:tmdbId', async (req, res) => {
         }))
       // 去重
       const seen = new Set()
-      return picks.filter((m) => !seen.has(m.tmdb_id) && seen.add(m.tmdb_id)).slice(0, 10)
+      return picks.filter((m) => !seen.has(m.tmdb_id) && seen.add(m.tmdb_id)).slice(0, 5)
     })
     res.json({ results })
   } catch (e) {
@@ -634,7 +638,7 @@ app.get('/api/similar/tv/:tvmazeId', async (req, res) => {
       })
       const candidates = (data.results || [])
         .filter((t) => t.poster_path)
-        .slice(0, 15)
+        .slice(0, 8)
 
       // 3. 用 TVmaze 搜索把 TMDB 剧集名匹配回 TVmaze 条目（拿 tvmaze_id + tvPoster）
       const resolveShow = async (name, year) =>
@@ -665,7 +669,7 @@ app.get('/api/similar/tv/:tvmazeId', async (req, res) => {
       return matched
         .filter(Boolean)
         .filter((m) => !seen.has(m.tvmaze_id) && seen.add(m.tvmaze_id))
-        .slice(0, 10)
+        .slice(0, 5)
     })
     res.json({ results })
   } catch (e) {
@@ -730,7 +734,7 @@ app.get('/api/liked/:tmdbId', async (req, res) => {
             const filtered = matched
               .filter(Boolean)
               .filter((m) => !seen.has(m.tmdb_id) && seen.add(m.tmdb_id))
-              .slice(0, 10)
+              .slice(0, 5)
             if (filtered.length > 0) return filtered
           }
         } catch {
@@ -742,7 +746,7 @@ app.get('/api/liked/:tmdbId', async (req, res) => {
       const data = await tmdb(`/movie/${id}/recommendations`)
       const picks = (data.results || [])
         .filter((m) => m.poster_path && String(m.id) !== String(id))
-        .slice(0, 10)
+        .slice(0, 5)
         .map((m) => ({
           tmdb_id: m.id, title: m.title,
           year: (m.release_date || '').slice(0, 4),
@@ -795,7 +799,7 @@ app.get('/api/liked/tv/:tvmazeId', async (req, res) => {
             const filtered = matched
               .filter(Boolean)
               .filter((m) => !seen.has(m.tvmaze_id) && seen.add(m.tvmaze_id))
-              .slice(0, 10)
+              .slice(0, 5)
             if (filtered.length > 0) return filtered
           }
         } catch { /* 降级 TMDB */ }
@@ -810,7 +814,7 @@ app.get('/api/liked/tv/:tvmazeId', async (req, res) => {
             const data = await tmdb(`/tv/${tv.id}/recommendations`)
             const picks = (data.results || [])
               .filter((t) => t.poster_path)
-              .slice(0, 10)
+              .slice(0, 5)
             // 用剧名在 TVmaze 匹配回 tvmaze_id + tvPoster
             const resolveShow = async (name, year) => {
               const data = await searchShows(name)
@@ -833,7 +837,7 @@ app.get('/api/liked/tv/:tvmazeId', async (req, res) => {
             return matched
               .filter(Boolean)
               .filter((m) => !seen.has(m.tvmaze_id) && seen.add(m.tvmaze_id))
-              .slice(0, 10)
+              .slice(0, 5)
           }
         } catch {}
       }
@@ -1042,10 +1046,10 @@ app.get('/api/tv/:id(\\d+)/episodes', async (req, res) => {
 // 字幕搜索
 app.get('/api/subtitles', async (req, res) => {
   try {
-    const { imdb_id, season, episode, lang } = req.query
-    if (!imdb_id) return res.status(400).json({ error: 'imdb_id required' })
-    const rawImdb = imdb_id.replace(/^tt/, '')
-    const results = await searchSubtitles(rawImdb, season, episode, lang || 'eng')
+    const { imdb_id, season, episode, lang, query } = req.query
+    if (!imdb_id && !query) return res.status(400).json({ error: 'imdb_id or query required' })
+    const rawImdb = (imdb_id || '').replace(/^tt/, '')
+    const results = await searchSubtitles(rawImdb, season, episode, lang || 'eng', query)
     res.json({ results })
   } catch (e) {
     res.status(502).json({ error: e.message })

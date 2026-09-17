@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { apiUrl } from '../api'
 
 const LANGS = [
@@ -24,6 +24,22 @@ function DownloadIcon({ className }) {
       <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   )
+}
+
+// 从字幕文件名中解析季集号，返回 { season, episode } 或 null
+function parseEpisode(filename) {
+  if (!filename) return null
+  const name = filename.toLowerCase()
+  // S01E03 / s1e12 / 1x03 等常见格式
+  const m = name.match(/s(\d{1,2})e(\d{1,3})/) || name.match(/(\d{1,2})x(\d{1,3})/)
+  if (m) return { season: parseInt(m[1]), episode: parseInt(m[2]) }
+  // "Episode 3" 格式
+  const m2 = name.match(/episode\s*(\d{1,3})/)
+  if (m2) return { season: null, episode: parseInt(m2[1]) }
+  // "E03" 单独出现
+  const m3 = name.match(/(^|[^0-9])e(\d{1,3})([^0-9]|$)/)
+  if (m3) return { season: null, episode: parseInt(m3[2]) }
+  return null
 }
 
 function SubtitleRow({ sub }) {
@@ -61,10 +77,36 @@ function SubtitleRow({ sub }) {
   )
 }
 
+function EpisodeGroup({ epNum, subs }) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div className="border border-zinc-200">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between bg-zinc-50 px-3 py-2 text-left transition hover:bg-zinc-100"
+      >
+        <span className="text-sm font-semibold text-zinc-800">Episode {epNum}</span>
+        <span className="flex items-center gap-2 text-xs text-zinc-500">
+          {subs.length} subtitle{subs.length > 1 ? 's' : ''}
+          <svg className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-1.5 p-1.5">
+          {subs.map((s, i) => (
+            <SubtitleRow key={i} sub={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Subtitles({ movie, embed }) {
   const [lang, setLang] = useState('eng')
   const [season, setSeason] = useState('')
-  const [episode, setEpisode] = useState('')
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -80,9 +122,9 @@ export default function Subtitles({ movie, embed }) {
     setLoading(true)
     setError('')
     setFetched(false)
-    const qs = new URLSearchParams({ imdb_id: imdbId, lang })
+    const qs = new URLSearchParams({ imdb_id: imdbId, lang, query: movie.title })
     if (season) qs.set('season', season)
-    if (episode) qs.set('episode', episode)
+    // 不再发送 episode 参数，获取整季所有字幕
     fetch(apiUrl(`/api/subtitles?${qs}`))
       .then((r) => r.json())
       .then((d) => {
@@ -99,7 +141,27 @@ export default function Subtitles({ movie, embed }) {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [imdbId, lang, season, episode])
+  }, [imdbId, lang, season])
+
+  // 按集数分组排列
+  const groupedResults = useMemo(() => {
+    if (!isTv || !season) return null
+    const groups = new Map() // epNum -> subs[]
+    const unknown = []
+    for (const sub of results) {
+      const ep = parseEpisode(sub.filename)
+      if (ep && ep.episode) {
+        const arr = groups.get(ep.episode) || []
+        arr.push(sub)
+        groups.set(ep.episode, arr)
+      } else {
+        unknown.push(sub)
+      }
+    }
+    // 按集数排序
+    const sortedGroups = [...groups.entries()].sort((a, b) => a[0] - b[0])
+    return { groups: sortedGroups, unknown }
+  }, [results, isTv, season])
 
   if (!imdbId) return null
 
@@ -125,7 +187,7 @@ export default function Subtitles({ movie, embed }) {
             <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Season</label>
             <select
               value={season}
-              onChange={(e) => { setSeason(e.target.value); setEpisode('') }}
+              onChange={(e) => setSeason(e.target.value)}
               className="border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800 focus:border-black focus:outline-none"
             >
               <option value="">All</option>
@@ -133,18 +195,6 @@ export default function Subtitles({ movie, embed }) {
                 <option key={s.number} value={s.number}>S{s.number}</option>
               ))}
             </select>
-            {season && (
-              <>
-                <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Ep</label>
-                <select
-                  value={episode}
-                  onChange={(e) => setEpisode(e.target.value)}
-                  className="border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800 focus:border-black focus:outline-none"
-                >
-                  <option value="">All</option>
-                </select>
-              </>
-            )}
           </div>
         )}
       </div>
@@ -168,11 +218,31 @@ export default function Subtitles({ movie, embed }) {
       )}
 
       {!loading && results.length > 0 && (
-        <div className="space-y-1.5">
-          {results.map((s, i) => (
-            <SubtitleRow key={i} sub={s} />
-          ))}
-        </div>
+        isTv && season && groupedResults ? (
+          <div className="space-y-2">
+            {groupedResults.groups.map(([epNum, subs]) => (
+              <EpisodeGroup key={epNum} epNum={epNum} subs={subs} />
+            ))}
+            {groupedResults.unknown.length > 0 && (
+              <div className="border border-zinc-200">
+                <div className="bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-800">
+                  Other <span className="text-xs font-normal text-zinc-500">({groupedResults.unknown.length})</span>
+                </div>
+                <div className="space-y-1.5 p-1.5">
+                  {groupedResults.unknown.map((s, i) => (
+                    <SubtitleRow key={i} sub={s} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {results.map((s, i) => (
+              <SubtitleRow key={i} sub={s} />
+            ))}
+          </div>
+        )
       )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
