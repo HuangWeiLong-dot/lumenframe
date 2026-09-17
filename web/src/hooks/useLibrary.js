@@ -259,23 +259,21 @@ export function useLibrary() {
 
   const toggleLike = useCallback((type, id, meta = {}) => {
     const key = likeKey(type, id)
-    const likes = cache.likes || []
-    const exists = likes.some((l) => likeKey(l.type, l.id) === key)
+    const exists = cache.likes.some((l) => likeKey(l.type, l.id) === key)
     if (exists) {
-      write({ ...cache, likes: likes.filter((l) => likeKey(l.type, l.id) !== key) })
+      write({ ...cache, likes: cache.likes.filter((l) => likeKey(l.type, l.id) !== key) })
     } else {
-      write({ ...cache, likes: [{ type, id, ...meta, addedAt: Date.now() }, ...likes] })
+      write({ ...cache, likes: [{ type, id, ...meta, addedAt: Date.now() }, ...cache.likes] })
     }
   }, [])
 
   const removeFromLikes = useCallback((type, id) => {
     const key = likeKey(type, id)
-    const likes = cache.likes || []
-    write({ ...cache, likes: likes.filter((l) => likeKey(l.type, l.id) !== key) })
+    write({ ...cache, likes: cache.likes.filter((l) => likeKey(l.type, l.id) !== key) })
   }, [])
 
   const isInLikes = useCallback(
-    (type, id) => (cache.likes || []).some((l) => likeKey(l.type, l.id) === likeKey(type, id)),
+    (type, id) => cache.likes.some((l) => likeKey(l.type, l.id) === likeKey(type, id)),
     [cache]
   )
 
