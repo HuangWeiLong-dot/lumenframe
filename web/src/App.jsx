@@ -725,6 +725,8 @@ export default function App() {
           {person && (
             <PersonPage
               personId={person.id}
+              isInLikes={lib.isInLikes}
+              toggleLike={lib.toggleLike}
               onBack={() => (canBackRef.current ? window.history.back() : goHome())}
               onOpenMovie={openMovie}
               onOpenShow={openShow}
@@ -741,6 +743,8 @@ export default function App() {
               kind={genre.kind}
               genreId={genre.id}
               genreName={genre.name}
+              isInLikes={lib.isInLikes}
+              toggleLike={lib.toggleLike}
               onBack={() => (canBackRef.current ? window.history.back() : goHome())}
               onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
             />
@@ -922,20 +926,45 @@ export default function App() {
         return (
         // 移动端纵向堆叠（海报居中在上、信息在下全宽）；sm 及以上恢复海报左 + 信息右
         <section className="relative mt-6 flex flex-col items-center gap-5 sm:mt-8 sm:flex-row sm:items-stretch sm:gap-8">
-          {/* Pin 到导航栏：右上角图钉按钮 */}
-          <button
-            onClick={() => pins.togglePin(movie)}
-            aria-label={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
-            title={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
-            className={`absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
-              pins.isPinned(kind, movie.id) ? 'text-black' : 'text-zinc-300 hover:text-zinc-500'
-            }`}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill={pins.isPinned(kind, movie.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 17v5" />
-              <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-            </svg>
-          </button>
+          {/* 右上角：Pin + Like 图标按钮 */}
+          <div className="absolute right-0 top-0 z-10 flex items-center gap-1">
+            <button
+              onClick={() => {
+                if (lib.isInLikes(kind, movie.id)) {
+                  lib.removeFromLikes(kind, movie.id)
+                } else {
+                  lib.toggleLike(kind, movie.id, {
+                    name: movie.title,
+                    year: movie.year,
+                    poster: posterFor(movie, 'w185'),
+                    yearRange: movie.yearRange || '',
+                  })
+                }
+              }}
+              aria-label={lib.isInLikes(kind, movie.id) ? 'Remove from likes' : 'Add to likes'}
+              title={lib.isInLikes(kind, movie.id) ? 'Remove from likes' : 'Add to likes'}
+              className={`flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
+                lib.isInLikes(kind, movie.id) ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-500'
+              }`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={lib.isInLikes(kind, movie.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => pins.togglePin(movie)}
+              aria-label={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
+              title={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
+              className={`flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
+                pins.isPinned(kind, movie.id) ? 'text-black' : 'text-zinc-300 hover:text-zinc-500'
+              }`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={pins.isPinned(kind, movie.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 17v5" />
+                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+              </svg>
+            </button>
+          </div>
           <SmartImage
             src={poster}
             alt={movie.title}

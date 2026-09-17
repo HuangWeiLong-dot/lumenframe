@@ -77,7 +77,7 @@ function RoleSection({ title, movies, tv, onOpen }) {
   )
 }
 
-export default function PersonPage({ personId, onBack, onOpenMovie, onOpenShow }) {
+export default function PersonPage({ personId, isInLikes, toggleLike, onBack, onOpenMovie, onOpenShow }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -147,7 +147,30 @@ export default function PersonPage({ personId, onBack, onOpenMovie, onOpenShow }
 
       {data && (
         <>
-          <header className="mt-6 flex flex-col items-center gap-6 sm:mt-8 sm:flex-row sm:items-start sm:gap-8">
+          <header className="relative mt-6 flex flex-col items-center gap-6 sm:mt-8 sm:flex-row sm:items-start sm:gap-8">
+            {/* Like 按钮 */}
+            <button
+              onClick={() => {
+                if (isInLikes('person', personId)) {
+                  toggleLike('person', personId)
+                } else {
+                  toggleLike('person', personId, {
+                    name: data.name,
+                    job: data.known_for_department || '',
+                    poster: data.profile_path ? `https://image.tmdb.org/t/p/w185${data.profile_path}` : null,
+                  })
+                }
+              }}
+              aria-label={isInLikes('person', personId) ? 'Remove from likes' : 'Add to likes'}
+              title={isInLikes('person', personId) ? 'Remove from likes' : 'Add to likes'}
+              className={`absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
+                isInLikes('person', personId) ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-500'
+              }`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isInLikes('person', personId) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+              </svg>
+            </button>
             <div className="h-48 w-36 shrink-0 overflow-hidden bg-zinc-100 shadow-md ring-1 ring-black/5 sm:h-64 sm:w-44">
               {data.profile_path ? (
                 <SmartImage

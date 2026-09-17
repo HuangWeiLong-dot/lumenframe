@@ -1,7 +1,7 @@
 // 全局图片加载队列：限制并发请求数，避免 API 代理被打满
 // 用法：acquireSlot().then(release => { /* 加载图片 */ release() })
 
-const MAX_CONCURRENT = 4
+const MAX_CONCURRENT = 8
 let active = 0
 const waiters = []
 

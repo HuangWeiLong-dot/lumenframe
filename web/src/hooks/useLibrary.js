@@ -17,9 +17,13 @@ function readStore() {
       (Array.isArray(arr) ? arr : []).map((m) =>
         m.kind === 'tv' ? m : { ...m, kind: 'movie' }
       )
-    return { watched: fix(obj.watched), watchlater: fix(obj.watchlater) }
+    return {
+      watched: fix(obj.watched),
+      watchlater: fix(obj.watchlater),
+      likes: Array.isArray(obj.likes) ? obj.likes : [],
+    }
   } catch {
-    return { watched: [], watchlater: [] }
+    return { watched: [], watchlater: [], likes: [] }
   }
 }
 
@@ -250,9 +254,33 @@ export function useLibrary() {
     onProgress?.({ done, total: needRatings.length, msg: 'Refresh complete' })
   }, [cache])
 
+  // --- Likes：支持 movie / tv / genre / person 四类 ---
+  const likeKey = (type, id) => `${type}:${id}`
+
+  const toggleLike = useCallback((type, id, meta = {}) => {
+    const key = likeKey(type, id)
+    const exists = cache.likes.some((l) => likeKey(l.type, l.id) === key)
+    if (exists) {
+      write({ ...cache, likes: cache.likes.filter((l) => likeKey(l.type, l.id) !== key) })
+    } else {
+      write({ ...cache, likes: [{ type, id, ...meta, addedAt: Date.now() }, ...cache.likes] })
+    }
+  }, [])
+
+  const removeFromLikes = useCallback((type, id) => {
+    const key = likeKey(type, id)
+    write({ ...cache, likes: cache.likes.filter((l) => likeKey(l.type, l.id) !== key) })
+  }, [])
+
+  const isInLikes = useCallback(
+    (type, id) => cache.likes.some((l) => likeKey(l.type, l.id) === likeKey(type, id)),
+    [cache]
+  )
+
   return {
     watched: store.watched,
     watchlater: store.watchlater,
+    likes: store.likes,
     addToWatched,
     removeFromWatched,
     addToWatchLater,
@@ -264,5 +292,8 @@ export function useLibrary() {
     refreshAllRatings,
     getNote,
     setNote,
+    toggleLike,
+    removeFromLikes,
+    isInLikes,
   }
 }
