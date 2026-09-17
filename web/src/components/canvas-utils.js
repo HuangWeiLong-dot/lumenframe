@@ -295,7 +295,9 @@ export function drawRatings(ctx, x, y, maxWidth, data) {
   const scale = Math.min(1, maxWidth / totalW)
 
   ctx.save()
-  const originX = align === 'center' ? x + (maxWidth - totalW * scale) / 2 : x
+  let originX = x
+  if (align === 'center') originX = x + (maxWidth - totalW * scale) / 2
+  else if (align === 'right') originX = x + maxWidth - totalW * scale
   ctx.translate(originX, y)
   ctx.scale(scale, scale)
   let cx = 0

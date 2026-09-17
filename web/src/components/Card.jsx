@@ -72,6 +72,32 @@ function buildFactRows(movie, specs, cfg) {
   return buildShowRows(movie, cfg) || buildSpecsRows(specs, cfg)
 }
 
+// 根据 cfg.textAlign 计算文本面板与海报的相对位置（横版用，竖版直接取默认值）
+// textAlign: 'left' | 'center' | 'right'
+//   - landscape 'right': 文字在左，海报在右
+//   - landscape 'left'/'center': 默认，文字在右，海报在左
+//   - portrait: tx=P, tw=W-P*2；海报位置由各 drawer 自己决定
+function resolveLayout(W, H, landscape, textAlign, opts = {}) {
+  const { posterFrac = 0.38, gap = 44, PAD = 56 } = opts
+  if (!landscape) return { tx: PAD, tw: W - PAD * 2, posterX: PAD, posterW: W * posterFrac }
+  const pw = W * posterFrac
+  if (textAlign === 'right') {
+    const tw = W - pw - gap - PAD * 2
+    return { tx: PAD, tw, posterX: W - pw - PAD, posterW: pw }
+  }
+  const tx = PAD + pw + gap
+  const tw = W - tx - PAD
+  return { tx, tw, posterX: PAD, posterW: pw }
+}
+
+// 根据 align 计算 drawText/drawTitle 的 x 坐标
+// drawText 内部用 ctx.textAlign：left 时 x=左边缘，center 时 x=中心，right 时 x=右边缘
+function alignX(align, left, width) {
+  if (align === 'right') return left + width
+  if (align === 'center') return left + width / 2
+  return left
+}
+
 // 绘制 InfoList（label: value 行）—— 标签与值基线对齐，支持 maxY 边界
 function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
   const { fs = 1, labelSize = 15, valueSize = 21, rowGap = 11, labelColor, valueColor, fontFamily = 'sans-serif', align = 'left', labelOpacity = 0.5, valueOpacity = 1, maxY = Infinity, measureOnly = false } = opts
@@ -90,7 +116,7 @@ function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
       // 值的第一行都放不下时整行跳过，避免只留下一个标签
       if (firstValueY > maxY) break
       if (!measureOnly) drawText(ctx, label, x + maxWidth / 2, labelBaseline, maxWidth, { fontSize: labelFontSize, color: labelColor, fontFamily, opacity: labelOpacity, letterSpacing: 0.22 * labelFontSize, transform: 'uppercase', align: 'center', baseline: 'alphabetic' })
-      const { lines, lineHeight } = wrapTextLines(ctx, value, maxWidth, valueFontSize, 1.25, 2)
+      const { lines, lineHeight } = wrapTextLines(ctx, value, maxWidth, valueFontSize, 1.25, 2, fontFamily)
       let by = valueStartY + valueFontSize * 0.8
       for (const ln of lines) {
         if (by > maxY) break
@@ -108,10 +134,14 @@ function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
       }
       cy = by + rowGap * fs
     } else {
-      const { lines, lineHeight } = wrapTextLines(ctx, value, maxWidth - labelW - 22, valueFontSize, 1.25, 2)
+      const { lines, lineHeight } = wrapTextLines(ctx, value, maxWidth - labelW - 22, valueFontSize, 1.25, 2, fontFamily)
       // 标签与首行值共用基线；放不下就整行跳过，杜绝“有标签无信息”的残行
       if (baseline > maxY) break
-      if (!measureOnly) drawText(ctx, label, x, baseline, labelW, { fontSize: labelFontSize, color: labelColor, fontFamily, opacity: labelOpacity, letterSpacing: 0.22 * labelFontSize, transform: 'uppercase', baseline: 'alphabetic' })
+      const isRight = align === 'right'
+      // 右对齐：标签贴面板右边缘，值在标签左侧
+      const labelX = isRight ? x + maxWidth : x
+      const valueX = isRight ? x + maxWidth - labelW - 22 : x + labelW + 22
+      if (!measureOnly) drawText(ctx, label, labelX, baseline, labelW, { fontSize: labelFontSize, color: labelColor, fontFamily, opacity: labelOpacity, letterSpacing: 0.22 * labelFontSize, transform: 'uppercase', baseline: 'alphabetic', align: isRight ? 'right' : 'left' })
       let by = baseline
       for (const ln of lines) {
         if (by > maxY) break
@@ -120,9 +150,9 @@ function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
           ctx.font = `600 ${valueFontSize}px ${fontFamily}`
           ctx.fillStyle = valueColor
           ctx.globalAlpha = valueOpacity
-          ctx.textAlign = 'left'
+          ctx.textAlign = isRight ? 'right' : 'left'
           ctx.textBaseline = 'alphabetic'
-          ctx.fillText(ln, x + labelW + 22, by)
+          ctx.fillText(ln, valueX, by)
           ctx.restore()
         }
         by += lineHeight
@@ -134,8 +164,8 @@ function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
 }
 
 // 辅助：仅计算换行结果（不绘制），返回 lines 和 lineHeight（超 maxLines 截断加省略号）
-function wrapTextLines(ctx, text, maxWidth, fontSize, lineHeight, maxLines) {
-  ctx.font = `600 ${fontSize}px sans-serif`
+function wrapTextLines(ctx, text, maxWidth, fontSize, lineHeight, maxLines, fontFamily = 'sans-serif') {
+  ctx.font = `600 ${fontSize}px ${fontFamily}`
   const words = String(text).split(/\s+/)
   const lines = []
   let line = ''
@@ -198,38 +228,38 @@ function drawMinimal(ctx, p) {
   const fontFamily = FONTS[theme.font]
   const ink = theme.ink
   const contentBottom = H - P - 50
+  const align = cfg.textAlign || 'left'
 
   if (landscape) {
-    const pw = W * 0.38
-    drawImageCover(ctx, posterImg, P, P, pw, H - P * 2, false)
-    const tx = P + pw + 44
-    const tw = W - tx - P
+    const { tx, tw, posterX, posterW } = resolveLayout(W, H, landscape, align, { posterFrac: 0.38, gap: 44, PAD: P })
+    drawImageCover(ctx, posterImg, posterX, P, posterW, H - P * 2, false)
     let cy = P
-    const { height: th } = drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 74 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 74 * fs })
+    const ax = alignX(align, tx, tw)
+    const { height: th } = drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 74 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 74 * fs, align })
     cy += th + 16
     if (cfg.showYear && movie.year) {
-      const { height: yh } = drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55 })
+      const { height: yh } = drawText(ctx, movie.year, ax, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55, align })
       cy += yh + 16
     }
-    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.9 }) + 16
+    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.9, align }) + 16
     if (cfg.showOverview && movie.overview) {
-      const { height: oh } = drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, lineHeight: 1.55, maxLines: 3, maxY: contentBottom, opacity: 0.78 })
+      const { height: oh } = drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, lineHeight: 1.55, maxLines: 3, maxY: contentBottom, opacity: 0.78, align })
       cy += oh + 16
     }
     if (cfg.showNote && note) {
-      const { height: nh } = drawText(ctx, `\u201C${note}\u201D`, tx, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 2, maxY: contentBottom, opacity: 0.6 })
+      const { height: nh } = drawText(ctx, `\u201C${note}\u201D`, ax, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 2, maxY: contentBottom, opacity: 0.6, align })
       cy += nh + 16
     }
     const creditsRows = buildCreditsRows(movie, cfg)
-    cy += drawInfoList(ctx, tx, cy, tw, creditsRows, { maxY: contentBottom,  fs: fs * 0.92, labelColor: ink, valueColor: ink, fontFamily }) + 12
+    cy += drawInfoList(ctx, tx, cy, tw, creditsRows, { maxY: contentBottom, fs: fs * 0.92, labelColor: ink, valueColor: ink, fontFamily, align }) + 12
     const specsRows = buildFactRows(movie, specs, cfg)
-    drawInfoList(ctx, tx, cy, tw, specsRows, { maxY: contentBottom,  fs: fs * 0.86, labelColor: ink, valueColor: ink, fontFamily })
-    // 底部水印
+    drawInfoList(ctx, tx, cy, tw, specsRows, { maxY: contentBottom, fs: fs * 0.86, labelColor: ink, valueColor: ink, fontFamily, align })
+    // 底部水印线：跨越整个宽度
     const fy = H - P - 20
     ctx.strokeStyle = 'rgba(128,128,128,0.35)'
     ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(tx, fy); ctx.lineTo(W - P, fy); ctx.stroke()
-    drawText(ctx, 'lumenframe', tx, fy + 8, tw, { fontSize: 16, color: ink, fontFamily, opacity: 0.5, letterSpacing: 0.34 * 16, transform: 'uppercase' })
+    ctx.beginPath(); ctx.moveTo(P, fy); ctx.lineTo(W - P, fy); ctx.stroke()
+    drawText(ctx, 'lumenframe', alignX(align, P, W - P * 2), fy + 8, W - P * 2, { fontSize: 16, color: ink, fontFamily, opacity: 0.5, letterSpacing: 0.34 * 16, transform: 'uppercase', align })
   } else {
     const tw = W - P * 2
     // 先测量标题以下整个文字栈的高度，再反推图片高度：
@@ -248,37 +278,38 @@ function drawMinimal(ctx, p) {
       textH += wrapTextHeight(ctx, note, tw, 20 * fs, 1.5, 2, 'normal', fontFamily).height + 16
     }
     if (creditsRows.length) {
-      textH += drawInfoList(ctx, 0, 0, tw, creditsRows, { fs: fs * 0.95, labelColor: ink, valueColor: ink, fontFamily, measureOnly: true }) + 12
+      textH += drawInfoList(ctx, 0, 0, tw, creditsRows, { fs: fs * 0.95, labelColor: ink, valueColor: ink, fontFamily, align, measureOnly: true }) + 12
     }
     if (specsRows.length) {
-      textH += drawInfoList(ctx, 0, 0, tw, specsRows, { fs: fs * 0.9, labelColor: ink, valueColor: ink, fontFamily, measureOnly: true })
+      textH += drawInfoList(ctx, 0, 0, tw, specsRows, { fs: fs * 0.9, labelColor: ink, valueColor: ink, fontFamily, align, measureOnly: true })
     }
     const basePh = (H - P * 3) * 0.52
     const ph = Math.min(basePh, Math.max(300, contentBottom - P - 28 - textH))
 
     drawImageCover(ctx, posterImg, P, P, W - P * 2, ph, false)
     let cy = P + ph + 28
-    const { height: th } = drawTitle(ctx, movie.title, P, cy, tw, { fontSize: 60 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 60 * fs })
+    const ax = alignX(align, P, tw)
+    const { height: th } = drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 60 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 60 * fs, align })
     cy += th + 16
     if (cfg.showYear && movie.year) {
-      const { height: yh } = drawText(ctx, movie.year, P, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55 })
+      const { height: yh } = drawText(ctx, movie.year, ax, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.55, align })
       cy += yh + 16
     }
-    cy += drawRatings(ctx, P, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.92 }) + 16
+    cy += drawRatings(ctx, P, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.92, align }) + 16
     if (cfg.showOverview && movie.overview) {
-      const { height: oh } = drawText(ctx, movie.overview, P, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, lineHeight: 1.55, maxLines: 3, maxY: contentBottom, opacity: 0.78 })
+      const { height: oh } = drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, lineHeight: 1.55, maxLines: 3, maxY: contentBottom, opacity: 0.78, align })
       cy += oh + 16
     }
     if (cfg.showNote && note) {
-      const { height: nh } = drawText(ctx, `\u201C${note}\u201D`, P, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 2, maxY: contentBottom, opacity: 0.6 })
+      const { height: nh } = drawText(ctx, `\u201C${note}\u201D`, ax, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 2, maxY: contentBottom, opacity: 0.6, align })
       cy += nh + 16
     }
-    cy += drawInfoList(ctx, P, cy, tw, creditsRows, { maxY: contentBottom,  fs: fs * 0.95, labelColor: ink, valueColor: ink, fontFamily }) + 12
-    drawInfoList(ctx, P, cy, tw, specsRows, { maxY: contentBottom,  fs: fs * 0.9, labelColor: ink, valueColor: ink, fontFamily })
+    cy += drawInfoList(ctx, P, cy, tw, creditsRows, { maxY: contentBottom, fs: fs * 0.95, labelColor: ink, valueColor: ink, fontFamily, align }) + 12
+    drawInfoList(ctx, P, cy, tw, specsRows, { maxY: contentBottom, fs: fs * 0.9, labelColor: ink, valueColor: ink, fontFamily, align })
     const fy = H - P - 20
     ctx.strokeStyle = 'rgba(128,128,128,0.35)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(P, fy); ctx.lineTo(W - P, fy); ctx.stroke()
-    drawText(ctx, 'lumenframe', P, fy + 8, tw, { fontSize: 16, color: ink, fontFamily, opacity: 0.5, letterSpacing: 0.34 * 16, transform: 'uppercase' })
+    drawText(ctx, 'lumenframe', ax, fy + 8, tw, { fontSize: 16, color: ink, fontFamily, opacity: 0.5, letterSpacing: 0.34 * 16, transform: 'uppercase', align })
   }
 }
 
@@ -288,20 +319,26 @@ function drawMagazine(ctx, p) {
   const fontFamily = FONTS[theme.font]
   const ink = theme.ink
   const contentBottom = H - P - 50
+  const align = cfg.textAlign || 'left'
 
   drawImageCover(ctx, posterImg, 0, 0, W, H, false)
-  // 渐变遮罩
+  // 渐变遮罩 — landscape 时根据 textAlign 决定渐变方向（文字所在侧更暗）
   let scrim
   if (landscape) {
-    scrim = linearGradient(ctx, 0, 0, W, 0, [[0, 'rgba(0,0,0,0.95)'], [0.36, 'rgba(0,0,0,0.8)'], [0.7, 'rgba(0,0,0,0.3)'], [1, 'rgba(0,0,0,0.2)']])
+    scrim = align === 'right'
+      ? linearGradient(ctx, 0, 0, W, 0, [[0, 'rgba(0,0,0,0.2)'], [0.3, 'rgba(0,0,0,0.3)'], [0.64, 'rgba(0,0,0,0.8)'], [1, 'rgba(0,0,0,0.95)']])
+      : linearGradient(ctx, 0, 0, W, 0, [[0, 'rgba(0,0,0,0.95)'], [0.36, 'rgba(0,0,0,0.8)'], [0.7, 'rgba(0,0,0,0.3)'], [1, 'rgba(0,0,0,0.2)']])
   } else {
     scrim = linearGradient(ctx, 0, 0, 0, H, [[0, 'rgba(0,0,0,0.4)'], [0.28, 'rgba(0,0,0,0.2)'], [0.58, 'rgba(0,0,0,0.75)'], [1, 'rgba(0,0,0,0.96)']])
   }
   ctx.fillStyle = scrim
   ctx.fillRect(0, 0, W, H)
 
+  // landscape 时文字面板位置/宽度取决于 align
   const tw = landscape ? W * 0.54 : W - P * 2
-  const tx = landscape ? P : P
+  const tx = landscape
+    ? (align === 'right' ? W - P - tw : P)
+    : P
   let cy = landscape ? H / 2 - 100 : H - P
   if (!landscape) {
     // 从底部往上排
@@ -320,7 +357,6 @@ function drawMagazine(ctx, p) {
     for (let i = items.length - 1; i >= 0; i--) {
       const item = items[i]
       if (item.type === 'ratings') {
-        // 估算高度
         heights[i] = 50 * fs * 0.8
       } else if (item.type === 'credits') {
         heights[i] = buildCreditsRows(movie, cfg).length * (21 * fs * 0.8 * 1.25 + 11 * fs * 0.8)
@@ -339,33 +375,35 @@ function drawMagazine(ctx, p) {
 
   // 绘制
   if (landscape) {
-    drawText(ctx, 'Now Showing', tx, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase' })
+    const ax = alignX(align, tx, tw)
+    drawText(ctx, 'Now Showing', ax, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase', align })
     cy += 14 * fs * 1.25 + 8
-    const { height: th } = drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 80 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 80 * fs, transform: 'uppercase' })
+    const { height: th } = drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 80 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 80 * fs, transform: 'uppercase', align })
     cy += th + 8
     if (cfg.showYear && movie.year) {
-      const { height: yh } = drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7 })
+      const { height: yh } = drawText(ctx, movie.year, ax, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7, align })
       cy += yh + 12
     }
-    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8 }) + 12
+    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8, align }) + 12
     if (cfg.showOverview && movie.overview) {
-      cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.88 }).height + 12
+      cy += drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.88, align }).height + 12
     }
     const cRows = buildCreditsRows(movie, cfg)
-    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom,  fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily }) + 10
+    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom, fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily, align }) + 10
     const sRows = buildFactRows(movie, specs, cfg)
-    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom,  fs: fs * 0.72, labelColor: ink, valueColor: ink, fontFamily })
+    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom, fs: fs * 0.72, labelColor: ink, valueColor: ink, fontFamily, align })
   } else {
-    drawText(ctx, 'Now Showing', tx, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase' })
+    const ax = alignX(align, tx, tw)
+    drawText(ctx, 'Now Showing', ax, cy, tw, { fontSize: 14 * fs, color: theme.accent, fontFamily, letterSpacing: 0.45 * 14 * fs, transform: 'uppercase', align })
     cy += 14 * fs * 1.25 + 8
-    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 72 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 72 * fs, transform: 'uppercase' }).height + 8
-    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7 }).height + 12
-    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8 }) + 12
-    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.88 }).height + 12
+    cy += drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 72 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 0.98, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 72 * fs, transform: 'uppercase', align }).height + 8
+    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, ax, cy, tw, { fontSize: 22 * fs, color: ink, fontFamily, opacity: 0.7, align }).height + 12
+    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8, align }) + 12
+    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 18 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.88, align }).height + 12
     const cRows = buildCreditsRows(movie, cfg)
-    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom,  fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily }) + 10
+    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom, fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily, align }) + 10
     const sRows = buildFactRows(movie, specs, cfg)
-    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom,  fs: fs * 0.72, labelColor: ink, valueColor: ink, fontFamily })
+    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom, fs: fs * 0.72, labelColor: ink, valueColor: ink, fontFamily, align })
   }
 }
 
@@ -376,37 +414,41 @@ function drawNoir(ctx, p) {
   const ink = theme.ink
   const contentBottom = H - P - 50
   const eyebrow = movie.kind === 'tv' ? 'A Series' : 'A Film'
+  const align = cfg.textAlign || 'left'
 
   if (landscape) {
-    const pw = W * 0.52
-    drawImageCover(ctx, posterImg, 0, 0, pw, H, true)
-    const tx = pw + 48
-    const tw = W - tx - 48
+    const { tx, tw, posterW } = resolveLayout(W, H, landscape, align, { posterFrac: 0.52, gap: 48, PAD: P })
+    // Noir 海报贴边：override resolveLayout 的 posterX
+    // align=right → 文字在左 → 海报靠右；align=left → 文字在右 → 海报靠左
+    const posterX = align === 'right' ? W - posterW : 0
+    drawImageCover(ctx, posterImg, posterX, 0, posterW, H, true)
     let cy = H / 2 - 130
-    cy += drawText(ctx, eyebrow, tx, cy, tw, { fontSize: 16 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 16 * fs, transform: 'uppercase', opacity: 0.5 }).height + 10
-    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 64 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
-    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5 }).height + 14
-    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.82 }) + 14
-    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6 }).height + 14
+    const ax = alignX(align, tx, tw)
+    cy += drawText(ctx, eyebrow, ax, cy, tw, { fontSize: 16 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 16 * fs, transform: 'uppercase', opacity: 0.5, align }).height + 10
+    cy += drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 64 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom, align }).height + 10
+    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, ax, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5, align }).height + 14
+    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.82, align }) + 14
+    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6, align }).height + 14
     const cRows = buildCreditsRows(movie, cfg)
-    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom,  fs: fs * 0.82, labelColor: ink, valueColor: ink, fontFamily }) + 12
+    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom, fs: fs * 0.82, labelColor: ink, valueColor: ink, fontFamily, align }) + 12
     const sRows = buildFactRows(movie, specs, cfg)
-    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom,  fs: fs * 0.76, labelColor: ink, valueColor: ink, fontFamily })
+    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom, fs: fs * 0.76, labelColor: ink, valueColor: ink, fontFamily, align })
   } else {
     const ph = H * 0.55
     drawImageCover(ctx, posterImg, 0, 0, W, ph, true)
     const tx = P
     const tw = W - P * 2
+    const ax = alignX(align, tx, tw)
     let cy = ph + 28
-    cy += drawText(ctx, eyebrow, tx, cy, tw, { fontSize: 15 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 15 * fs, transform: 'uppercase', opacity: 0.5 }).height + 10
-    cy += drawTitle(ctx, movie.title, tx, cy, tw, { fontSize: 54 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom }).height + 10
-    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, tx, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5 }).height + 14
-    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8 }) + 14
-    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, tx, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6 }).height + 14
+    cy += drawText(ctx, eyebrow, ax, cy, tw, { fontSize: 15 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 15 * fs, transform: 'uppercase', opacity: 0.5, align }).height + 10
+    cy += drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 54 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1, maxLines: 2, maxY: contentBottom, align }).height + 10
+    if (cfg.showYear && movie.year) cy += drawText(ctx, movie.year, ax, cy, tw, { fontSize: 20 * fs, color: ink, fontFamily, opacity: 0.5, align }).height + 14
+    cy += drawRatings(ctx, tx, cy, tw, { movie, cfg, ratings, personal, theme, fs: fs * 0.8, align }) + 14
+    if (cfg.showOverview && movie.overview) cy += drawText(ctx, movie.overview, ax, cy, tw, { fontSize: 19 * fs, color: ink, fontFamily, lineHeight: 1.5, maxLines: 3, maxY: contentBottom, opacity: 0.6, align }).height + 14
     const cRows = buildCreditsRows(movie, cfg)
-    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom,  fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily }) + 12
+    cy += drawInfoList(ctx, tx, cy, tw, cRows, { maxY: contentBottom, fs: fs * 0.8, labelColor: ink, valueColor: ink, fontFamily, align }) + 12
     const sRows = buildFactRows(movie, specs, cfg)
-    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom,  fs: fs * 0.74, labelColor: ink, valueColor: ink, fontFamily })
+    drawInfoList(ctx, tx, cy, tw, sRows, { maxY: contentBottom, fs: fs * 0.74, labelColor: ink, valueColor: ink, fontFamily, align })
   }
 }
 
@@ -415,6 +457,7 @@ function drawRatingsCard(ctx, p) {
   const { W, H, movie, cfg, theme, landscape, ratings, personal, posterImg } = p
   const fontFamily = FONTS[theme.font]
   const ink = theme.ink
+  const align = cfg.textAlign || 'left'
 
   // 海报铺底 + 深色渐变遮罩
   drawImageCover(ctx, posterImg, 0, 0, W, H, false)
@@ -427,13 +470,16 @@ function drawRatingsCard(ctx, p) {
   ctx.fillStyle = scrim
   ctx.fillRect(0, 0, W, H)
 
-  const cx = W / 2
+  const contentLeft = P
+  const contentRight = W - P
+  const contentCX = W / 2
+  const titleX = align === 'center' ? contentCX : (align === 'right' ? contentRight : contentLeft)
 
   // 顶部电影名
   const titleSize = landscape ? 30 : 26
-  drawText(ctx, movie.title, cx, P, W - P * 2, {
+  drawText(ctx, movie.title, titleX, P, W - P * 2, {
     fontSize: titleSize, color: ink, fontFamily, fontWeight: 700,
-    lineHeight: 1.1, maxLines: 1, align: 'center', opacity: 0.9,
+    lineHeight: 1.1, maxLines: 1, align, opacity: 0.9,
     transform: 'uppercase', maxY: H - P - 50, ellipsis: false,
   })
 
@@ -511,11 +557,11 @@ function drawRatingsCard(ctx, p) {
     drawRatingBlock(ctx, bx, by, bw, bh, it)
   })
 
-  // 底部年份（与标题水平对齐：居中）
+  // 底部年份（与标题对齐）
   if (cfg.showYear && movie.year) {
-    drawText(ctx, String(movie.year), cx, H - P, W - P * 2, {
+    drawText(ctx, String(movie.year), titleX, H - P, W - P * 2, {
       fontSize: landscape ? 22 : 18, color: ink, fontFamily, fontWeight: 500,
-      align: 'center', opacity: 0.6,
+      align, opacity: 0.6,
     })
   }
 }
@@ -572,6 +618,7 @@ function drawInfoCard(ctx, p) {
   const fontFamily = FONTS[theme.font]
   const ink = theme.ink
   const accent = theme.accent
+  const align = cfg.textAlign || 'left'
 
   // 所选图片铺底
   drawImageCover(ctx, posterImg, 0, 0, W, H, false)
@@ -589,7 +636,7 @@ function drawInfoCard(ctx, p) {
   ctx.fillRect(0, 0, W, H)
 
   const panelW = landscape ? W * 0.66 : W * 0.86
-  const x = cx - panelW / 2
+  const x = align === 'center' ? cx - panelW / 2 : (align === 'right' ? W - P - panelW : P)
   const contentBottom = H - P - 22
   const availH = contentBottom - P
 
@@ -606,7 +653,7 @@ function drawInfoCard(ctx, p) {
   const hasLists = creditsRows.length > 0 || specsRows.length > 0
 
   const listOpts = (rows, fs) => ({
-    fs, labelSize: 11, valueSize: 17, rowGap: 9, align: 'center',
+    fs, labelSize: 11, valueSize: 17, rowGap: 9, align: align === 'center' ? 'center' : align,
     labelColor: accent, valueColor: ink, fontFamily,
   })
 
@@ -661,59 +708,61 @@ function drawInfoCard(ctx, p) {
   let cy = cy0 - totalH / 2
 
   // 眉标
-  drawText(ctx, movie.kind === 'tv' ? 'Show Info' : 'Film Info', cx, cy, panelW, {
+  const textX = align === 'center' ? cx : (align === 'right' ? x + panelW : x)
+  drawText(ctx, movie.kind === 'tv' ? 'Show Info' : 'Film Info', textX, cy, panelW, {
     fontSize: 11 * s, color: accent, fontFamily, fontWeight: 600,
-    letterSpacing: 0.5 * 11 * s, transform: 'uppercase', align: 'center', shadow: textShadow,
+    letterSpacing: 0.5 * 11 * s, transform: 'uppercase', align, shadow: textShadow,
   })
   cy += 11 * s * 1.2 + 14 * s
 
   // 片名
   const titleFs = (landscape ? 58 : 44) * s
-  cy += drawText(ctx, movie.title, cx, cy, panelW, {
+  cy += drawText(ctx, movie.title, textX, cy, panelW, {
     fontSize: titleFs, color: ink, fontFamily, fontWeight: 900,
-    lineHeight: 1.06, maxLines: 2, align: 'center', shadow: textShadow, ellipsis: false,
+    lineHeight: 1.06, maxLines: 2, align, shadow: textShadow, ellipsis: false,
     letterSpacing: -0.025 * titleFs,
   }).height
 
   // 年份
   if (cfg.showYear && movie.year) {
     cy += 6 * s
-    cy += drawText(ctx, String(movie.year), cx, cy, panelW, {
+    cy += drawText(ctx, String(movie.year), textX, cy, panelW, {
       fontSize: 16 * s, color: ink, fontFamily, fontWeight: 400,
-      align: 'center', opacity: 0.72, shadow: textShadow,
+      align, opacity: 0.72, shadow: textShadow,
     }).height
   }
 
   // 评分
   if (hasRatings) {
     cy += 8 * s
-    cy += drawRatings(ctx, x, cy, panelW, { movie, cfg, ratings, personal, theme, fs: 0.82 * s, align: 'center' })
+    cy += drawRatings(ctx, x, cy, panelW, { movie, cfg, ratings, personal, theme, fs: 0.82 * s, align })
   }
 
   // 简介
   if (cfg.showOverview && movie.overview) {
     cy += 14 * s
-    cy += drawText(ctx, movie.overview, cx, cy, panelW, {
+    cy += drawText(ctx, movie.overview, textX, cy, panelW, {
       fontSize: 16 * s, color: ink, fontFamily, fontWeight: 400,
-      lineHeight: 1.5, maxLines: 3, align: 'center', opacity: 0.8, shadow: textShadow,
+      lineHeight: 1.5, maxLines: 3, align, opacity: 0.8, shadow: textShadow,
     }).height
   }
 
   // 短评（居中引号样式）
   if (cfg.showNote && note) {
     cy += 14 * s
-    cy += drawText(ctx, `\u201C${note}\u201D`, cx, cy, panelW, {
+    cy += drawText(ctx, `\u201C${note}\u201D`, textX, cy, panelW, {
       fontSize: 15 * s, color: ink, fontFamily, fontWeight: 400,
-      lineHeight: 1.4, maxLines: 2, align: 'center', opacity: 0.62, shadow: textShadow,
+      lineHeight: 1.4, maxLines: 2, align, opacity: 0.62, shadow: textShadow,
     }).height
   }
 
-  // 分隔线（居中短线）
+  // 分隔线
   if (hasLists) {
     cy += 14 * s
     ctx.strokeStyle = 'rgba(255,255,255,0.22)'
     ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(cx - 50 * s, cy + 0.5); ctx.lineTo(cx + 50 * s, cy + 0.5); ctx.stroke()
+    const dividerCx = align === 'center' ? cx : textX
+    ctx.beginPath(); ctx.moveTo(dividerCx - 50 * s, cy + 0.5); ctx.lineTo(dividerCx + 50 * s, cy + 0.5); ctx.stroke()
     cy += 1 + 14 * s
   }
 
@@ -725,9 +774,9 @@ function drawInfoCard(ctx, p) {
   // Tech Specs
   if (specsRows.length > 0) {
     cy += 12 * s
-    drawText(ctx, 'Tech Specs', cx, cy, panelW, {
+    drawText(ctx, 'Tech Specs', textX, cy, panelW, {
       fontSize: 11 * s, color: accent, fontFamily, fontWeight: 600,
-      letterSpacing: 0.42 * 11 * s, transform: 'uppercase', align: 'center', shadow: textShadow,
+      letterSpacing: 0.42 * 11 * s, transform: 'uppercase', align, shadow: textShadow,
     })
     cy += 11 * s * 1.3 + 5 * s
     drawInfoList(ctx, x, cy, panelW, specsRows, { ...listOpts(specsRows, s * 0.86), valueSize: 16, rowGap: 9 })
