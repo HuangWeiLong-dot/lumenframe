@@ -26,75 +26,43 @@ import { useI18n } from './i18n'
 import { apiUrl, apiUrlWithLang, posterUrl, posterFor, downloadImage } from './api'
 import { genreIdByName } from './genres'
 import { BASE_PATH, resolveSpaRedirect } from './spaUrl'
+import {
+  titleUrl, personUrl, genreUrl, libraryUrl,
+  parseTitleRoute, parsePersonRoute, parseGenreRoute, parseLibraryRoute,
+  preopenTab, setTabUrl, closeTab,
+} from './routes'
+import NavLink from './components/NavLink'
 import { safeGet, safeSet } from './storage'
 import { DetailHeaderSkeleton, RatingsSkeleton, SpecsSkeleton } from './components/Skeleton'
 import StatusBadge from './components/StatusBadge'
 
 // ---- 极简 History API 路由 ----
 // 电影：{BASE}movie/{tmdbId}-{slug}；剧集：{BASE}tv/{tvmazeId}-{slug}
-// 演职员：{BASE}person/{tmdbPersonId}-{slug}
-// id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省
+// 演职员：{BASE}person/{tmdbPersonId}-{slug}；类型：{BASE}genre/{kind}/{id}-{slug}
+// id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省。
+//
+// 路径拼装/解析都在 ./routes，内容卡片要自己拼 <a href>（新标签页打开），
+// 放在这里子组件就得反向 import App.jsx。
 
 // 深链回退（_spa 解包）与 BASE_PATH 推导已搬到 ./spaUrl：
 // Supabase 的邮件回调地址也要用 BASE_PATH，从那里 import 可避免循环依赖。
 // 这里必须仍在模块求值期同步调用一次——它是深链能正常还原的前提。
 resolveSpaRedirect()
 
-function slugify(title) {
-  return String(title || '')
-    .normalize('NFKD')
-    .replace(/[^a-zA-Z0-9\s-]/g, '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\s_]+/g, '-')
-    .replace(/-+/g, '-')
-}
-
-function titleUrl(kind, id, title) {
-  const slug = slugify(title)
-  return `${BASE_PATH}${kind === 'tv' ? 'tv' : 'movie'}/${id}${slug ? `-${slug}` : ''}`
-}
-
-function movieUrl(id, title) {
-  return titleUrl('movie', id, title)
-}
-
-function personUrl(id, name) {
-  const slug = slugify(name)
-  return `${BASE_PATH}person/${id}${slug ? `-${slug}` : ''}`
-}
-
-function genreUrl(kind, id, name) {
-  const slug = slugify(name)
-  return `${BASE_PATH}genre/${kind}/${id}${slug ? `-${slug}` : ''}`
-}
-
-// 从当前 location 解析标题路由；非标题页返回 null
-function parseTitleRoute() {
-  const m = window.location.pathname.match(/\/(movie|tv)\/(\d+)(?:-.*)?\/?$/)
-  return m ? { kind: m[1] === 'tv' ? 'tv' : 'movie', id: Number(m[2]) } : null
-}
-
-function parsePersonRoute() {
-  const m = window.location.pathname.match(/\/person\/(\d+)(?:-.*)?\/?$/)
-  return m ? { id: Number(m[1]) } : null
-}
-
-function parseGenreRoute() {
-  const m = window.location.pathname.match(/\/genre\/(movie|tv)\/(\d+)(?:-.*)?\/?$/)
-  return m ? { kind: m[1], id: Number(m[2]) } : null
-}
-
-function parseMovieRoute() {
-  return parseTitleRoute()?.id ?? null
-}
-
-function libraryUrl() {
-  return `${BASE_PATH}library`
-}
-
-function parseLibraryRoute() {
-  return /\/library\/?$/.test(window.location.pathname)
+// 演职员链接（导演 / 编剧 / 主演共用）。
+// 电影：TMDB person id 就在手上，直接拼 href —— 真 <a>，新标签页。
+// 剧集：cast 来自 TVmaze，id 是 TVmaze 的，得先用名字查 TMDB person，
+//       所以只能交给 App 的 openPerson 在点击的同步阶段先占一个标签页（target:'new'）。
+function Credit({ id, name, source, onLookup, children }) {
+  const className = 'text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline'
+  if (source === 'tmdb' && id) {
+    return <NavLink to={personUrl(id, name)} className={className}>{children}</NavLink>
+  }
+  return (
+    <button type="button" onClick={() => onLookup({ id, name, source })} className={className}>
+      {children}
+    </button>
+  )
 }
 
 // 滚动海报背景墙（Canvas 绘制，海报来源 = TMDB 本周热门）
@@ -546,10 +514,6 @@ export default function App() {
     }
   }
 
-  function openMovie(id, opts) {
-    return openTitle('movie', id, opts)
-  }
-
   function openShow(id, opts) {
     return openTitle('tv', id, opts)
   }
@@ -576,7 +540,15 @@ export default function App() {
 
   // 打开演职员详情页：source='tmdb' 时 id 直接是 TMDB person id；
   // source='tvmaze'（剧集 cast）时需先用名字查 TMDB person，再跳转
-  async function openPerson({ id, name, source = 'tmdb' } = {}, { history: historyOpt = 'push', scroll = true } = {}) {
+  //
+  // target='new'：同步能拼出 URL 的调用点直接用 <NavLink> 了，走不到这里；
+  // 会走到这里的是「剧集演职员」这类要先 await 查 id 的。await 期间调用栈已经退出点击事件，
+  // 那时再 window.open 会被弹窗拦截，所以必须在点击的**同步阶段**先占一个空白标签页。
+  async function openPerson({ id, name, source = 'tmdb' } = {},
+                            { history: historyOpt = 'push', scroll = true, target = 'self' } = {}) {
+    let tab = target === 'new' ? preopenTab() : null
+    if (target === 'new' && !tab) target = 'self' // 被拦截 → 退回原地跳转
+
     let tmdbId = null
     if (source === 'tmdb' && id) {
       tmdbId = id
@@ -595,13 +567,21 @@ export default function App() {
         setPersonSearchLoading(false)
       }
       if (!tmdbId) {
+        closeTab(tab) // 查不到就别留个空白标签页
         setPersonSearchError(t('detail.couldntFindPerson', { name }))
         // 5 秒后自动清掉错误提示
         setTimeout(() => setPersonSearchError(''), 5000)
         return
       }
     }
-    if (!tmdbId) return
+    if (!tmdbId) { closeTab(tab); return }
+
+    // 新标签页分支：当前页面完全不动，所以不碰 reqTokenRef / resetMovieView
+    if (tab) {
+      setTabUrl(tab, personUrl(tmdbId, name))
+      return
+    }
+
     reqTokenRef.current++
     resetMovieView()
     setPerson({ id: tmdbId, name: name || '' })
@@ -614,6 +594,11 @@ export default function App() {
       window.history.replaceState({ person: true, id: tmdbId, name: name || '' }, '', url)
     }
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // <Credit> 的回调：剧集演职员没有 TMDB id，先占标签页再异步查（见 openPerson）
+  function lookupPersonInNewTab(args) {
+    return openPerson(args, { target: 'new' })
   }
 
   // 打开类型浏览页（已有 TMDB id）
@@ -706,7 +691,6 @@ export default function App() {
       {/* 左侧固定收藏栏（收起的抽屉）：Pin 后卡片从右侧滑入并常驻页面左边缘 */}
       <PinnedDrawer
         pinned={pins.pinned}
-        onPick={(p) => openTitle(p.kind, p.id)}
         onUnpin={(p) => pins.removePin(p.kind, p.id)}
       />
 
@@ -724,12 +708,7 @@ export default function App() {
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-24"
         >
-          <LibraryPage
-            onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
-            onOpenPerson={openPerson}
-            onOpenGenre={openGenre}
-            onGoHome={goHome}
-          />
+          <LibraryPage onGoHome={goHome} />
         </main>
       ) : view === 'person' ? (
         <main
@@ -741,7 +720,6 @@ export default function App() {
               isInLikes={lib.isInLikes}
               toggleLike={lib.toggleLike}
               onBack={() => (canBackRef.current ? window.history.back() : goHome())}
-              onOpenMovie={openMovie}
               onOpenShow={openShow}
             />
           )}
@@ -758,7 +736,6 @@ export default function App() {
               isInLikes={lib.isInLikes}
               toggleLike={lib.toggleLike}
               onBack={() => (canBackRef.current ? window.history.back() : goHome())}
-              onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
             />
           )}
         </main>
@@ -820,17 +797,11 @@ export default function App() {
                     .filter(Boolean)
                     .slice(0, 3)
                   return (
-                    <button
+                    <NavLink
                       key={`p:${p.id}`}
-                      onClick={() => {
-                        setDropdownOpen(false)
-                        setQuery('')
-                        openPerson({
-                          id: p.id,
-                          name: p.name,
-                          source: 'tmdb',
-                        })
-                      }}
+                      to={personUrl(p.id, p.name)}
+                      // onClick 只关下拉：不要 preventDefault，那会取消新标签页
+                      onClick={() => { setDropdownOpen(false); setQuery('') }}
                       className="flex w-full items-center gap-3 border-b border-zinc-100 px-3 py-3 text-left transition hover:bg-zinc-50"
                     >
                       <div className="h-16 w-12 shrink-0 overflow-hidden bg-zinc-100">
@@ -857,7 +828,7 @@ export default function App() {
                           </p>
                         )}
                       </div>
-                    </button>
+                    </NavLink>
                   )
                 })}
                 <p className="sticky bottom-0 bg-white px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-400">
@@ -870,9 +841,10 @@ export default function App() {
               const isTv = m.kind === 'tv'
               const poster = posterFor(m, 'w185')
               return (
-                <button
+                <NavLink
                   key={`${isTv ? 'tv' : 'm'}:${m.id}`}
-                  onClick={() => (isTv ? openShow(m.id) : openMovie(m.id))}
+                  to={titleUrl(isTv ? 'tv' : 'movie', m.id, m.title)}
+                  onClick={() => { setDropdownOpen(false); setQuery('') }}
                   className="flex w-full gap-3 border-b border-zinc-100 px-3 py-3 text-left transition last:border-0 hover:bg-zinc-50"
                 >
                   {/* 固定 2:3 海报框 + object-cover，任何海报都不会拉伸 */}
@@ -897,7 +869,7 @@ export default function App() {
                       {m.overview || t('common.noDescription')}
                     </p>
                   </div>
-                </button>
+                </NavLink>
               )
             })}
           </div>
@@ -906,13 +878,9 @@ export default function App() {
 
       {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
 
-      {!movie && !detailLoading && (
-        <QuizRecommender
-          onPick={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
-        />
-      )}
+      {!movie && !detailLoading && <QuizRecommender />}
 
-      {!movie && !detailLoading && <MovieCollage onPick={openMovie} />}
+      {!movie && !detailLoading && <MovieCollage />}
 
       {detailLoading && <DetailHeaderSkeleton />}
 
@@ -1180,16 +1148,27 @@ export default function App() {
               <div className="flex gap-2 text-sm">
                 <dt className="shrink-0 font-medium text-zinc-500">{t('detail.genres')}</dt>
                 <dd className="text-zinc-800">
-                  {movie.genres.map((g, idx) => (
-                    <button
-                      key={`${g}-${idx}`}
-                      onClick={() => openGenreByName(g, genreSource, idx)}
-                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
-                    >
-                      {idx > 0 && <span className="text-zinc-400">, </span>}
-                      {g}
-                    </button>
-                  ))}
+                  {movie.genres.map((g, idx) => {
+                    // 类型名 -> TMDB genre id 能同步解析出来就直接拼 href（新标签页）；
+                    // 解析不出的极端情况（中文界面且后端没给 genre_ids）退回原地跳转
+                    const gid = genreIdByName(g, genreSource) || movie?.genre_ids?.[idx] || null
+                    const cls = 'text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline'
+                    return gid ? (
+                      <NavLink key={`${g}-${idx}`} to={genreUrl(genreSource, gid, g)} className={cls}>
+                        {idx > 0 && <span className="text-zinc-400">, </span>}
+                        {g}
+                      </NavLink>
+                    ) : (
+                      <button
+                        key={`${g}-${idx}`}
+                        onClick={() => openGenreByName(g, genreSource, idx)}
+                        className={cls}
+                      >
+                        {idx > 0 && <span className="text-zinc-400">, </span>}
+                        {g}
+                      </button>
+                    )
+                  })}
                 </dd>
               </div>
             )}
@@ -1197,16 +1176,14 @@ export default function App() {
               <div className="flex gap-2 text-sm">
                 <dt className="shrink-0 font-medium text-zinc-500">{t('detail.director')}</dt>
                 <dd className="text-zinc-800">
-                  <button
-                    onClick={() => openPerson({
-                      id: movie.credits.directorId,
-                      name: movie.credits.director,
-                      source: movie.credits.directorId ? 'tmdb' : 'tvmaze',
-                    })}
-                    className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                  <Credit
+                    id={movie.credits.directorId}
+                    name={movie.credits.director}
+                    source={movie.credits.directorId ? 'tmdb' : 'tvmaze'}
+                    onLookup={lookupPersonInNewTab}
                   >
                     {movie.credits.director}
-                  </button>
+                  </Credit>
                 </dd>
               </div>
             )}
@@ -1215,18 +1192,16 @@ export default function App() {
                 <dt className="shrink-0 font-medium text-zinc-500">{t('detail.writers')}</dt>
                 <dd className="text-zinc-800">
                   {movie.credits.writers.map((name, idx) => (
-                    <button
+                    <Credit
                       key={`${name}-${idx}`}
-                      onClick={() => openPerson({
-                        id: movie.credits.writerIds?.[idx],
-                        name,
-                        source: movie.credits.writerIds?.[idx] ? 'tmdb' : 'tvmaze',
-                      })}
-                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                      id={movie.credits.writerIds?.[idx]}
+                      name={name}
+                      source={movie.credits.writerIds?.[idx] ? 'tmdb' : 'tvmaze'}
+                      onLookup={lookupPersonInNewTab}
                     >
                       {idx > 0 && <span className="text-zinc-400">, </span>}
                       {name}
-                    </button>
+                    </Credit>
                   ))}
                 </dd>
               </div>
@@ -1236,21 +1211,19 @@ export default function App() {
                 <dt className="shrink-0 font-medium text-zinc-500">{t('detail.starring')}</dt>
                 <dd className="text-zinc-800">
                   {movie.credits.cast.slice(0, 5).map((p, idx) => (
-                    <button
+                    <Credit
                       key={`${p.id || p.name}-${idx}`}
-                      onClick={() => openPerson({
-                        id: p.id,
-                        name: p.name,
-                        source: isTv ? 'tvmaze' : 'tmdb',
-                      })}
-                      className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
+                      id={p.id}
+                      name={p.name}
+                      source={isTv ? 'tvmaze' : 'tmdb'}
+                      onLookup={lookupPersonInNewTab}
                     >
                       {idx > 0 && <span className="text-zinc-400">, </span>}
                       {p.name}
                       {p.character && (
                         <span className="text-zinc-500"> ({p.character})</span>
                       )}
-                    </button>
+                    </Credit>
                   ))}
                 </dd>
               </div>
@@ -1519,18 +1492,8 @@ export default function App() {
 
       {movie && !detailLoading && (
         <CollapsibleSection title={t('detail.recommendations')}>
-          <TasteDiveSimilar
-            key={`similar-${movie.id}`}
-            movie={movie}
-            embed
-            onSelect={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
-          />
-          <AlsoLiked
-            key={`liked-${movie.id}`}
-            movie={movie}
-            embed
-            onSelect={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
-          />
+          <TasteDiveSimilar key={`similar-${movie.id}`} movie={movie} embed />
+          <AlsoLiked key={`liked-${movie.id}`} movie={movie} embed />
         </CollapsibleSection>
       )}
 

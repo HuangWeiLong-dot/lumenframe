@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import SmartImage from './SmartImage'
 import StatusBadge from './StatusBadge'
+import NavLink from './NavLink'
 import { apiUrlWithLang, posterFor } from '../api'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
 // 同类推荐：电影走 TasteDive(type=movie)+TMDB 解析，剧集走 TasteDive(type=show)+TVmaze 解析
-export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
+export default function TasteDiveSimilar({ movie, embed = false }) {
   const { t, apiLang } = useI18n()
   const id = movie?.id
   const kind = movie?.kind === 'tv' ? 'tv' : 'movie'
@@ -88,10 +90,9 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
                 'w185'
               )
               return (
-                <button
+                <NavLink
                   key={`${itemKind}:${itemId}`}
-                  type="button"
-                  onClick={() => onSelect?.(itemKind, itemId)}
+                  to={titleUrl(itemKind, itemId, m.title)}
                   className="group text-left"
                   title={m.title}
                 >
@@ -107,7 +108,7 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
                     {m.title}
                   </p>
                   <p className="text-[11px] text-zinc-500">{m.year || '—'}</p>
-                </button>
+                </NavLink>
               )
             })}
           </div>

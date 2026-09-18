@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import SmartImage from './SmartImage'
 import StatusBadge from './StatusBadge'
+import NavLink from './NavLink'
 import { apiUrlWithLang, posterUrl } from '../api'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
-function TitleCard({ item, onOpen, kind }) {
+function TitleCard({ item, kind }) {
   const { t } = useI18n()
   const poster = item.poster_path ? posterUrl(item.poster_path, 'w185') : null
   return (
-    <button
-      onClick={() => onOpen(kind, item.id)}
+    <NavLink
+      to={titleUrl(kind, item.id, item.title)}
       className="group flex flex-col gap-1 text-left"
       title={`${item.title}${item.year ? ` (${item.year})` : ''}`}
     >
@@ -35,11 +37,11 @@ function TitleCard({ item, onOpen, kind }) {
       {item.rating > 0 && (
         <p className="text-[11px] font-semibold text-amber-600">★ {item.rating.toFixed(1)}</p>
       )}
-    </button>
+    </NavLink>
   )
 }
 
-export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleLike, onBack, onOpenTitle }) {
+export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleLike, onBack }) {
   const { t, apiLang } = useI18n()
   const [items, setItems] = useState([])
   const [page, setPage] = useState(1)
@@ -141,7 +143,7 @@ export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleL
         <>
           <div className="mt-8 grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-6">
             {items.map((m) => (
-              <TitleCard key={`${kind}:${m.id}`} item={m} kind={kind} onOpen={onOpenTitle} />
+              <TitleCard key={`${kind}:${m.id}`} item={m} kind={kind} />
             ))}
           </div>
           {page < totalPages && (

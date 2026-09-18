@@ -20,13 +20,16 @@
 
         // 从任意深链推导出项目根路径（兼容 GitHub Pages /repo/ 子路径、
         // 自定义域名根路径 '/'、以及 hash 部署等）。
-        // 策略：遇到 movie/ /library /library/xxx /assets 等已知段就截断到它之前。
+        // 策略：按**路径分段**找第一个已知的路由/资源段，截断到它之前。
+        // 不能用子串 indexOf：/<repo>/genre/movie/18-action 会先命中 'movie/'，
+        // 算出 /<repo>/genre/ 这个不存在的目录，重定向过去又是一次 404 —— 死循环。
+        // 判据与 src/spaUrl.js 的 getBasePath 保持一致，改一处必须改另一处。
         function detectRoot(path) {
-          var KNOWN = ['movie/', 'tv/', 'person/', 'genre/', 'library', 'assets', 'api/', 'filmgrab', 'card-studio']
-          for (var i = 0; i < KNOWN.length; i++) {
-            var k = KNOWN[i]
-            var idx = path.indexOf('/' + k)
-            if (idx >= 0) return path.slice(0, idx + 1)
+          var KNOWN = { movie: 1, tv: 1, person: 1, genre: 1, library: 1, assets: 1, api: 1, filmgrab: 1, 'card-studio': 1 }
+          var segs = path.split('/')
+          // segs[0] 恒为空串，从 1 开始
+          for (var i = 1; i < segs.length; i++) {
+            if (KNOWN[segs[i]]) return i === 1 ? '/' : '/' + segs.slice(1, i).join('/') + '/'
           }
           // 没匹配上任何已知段，保守返回最后一个 / 之前
           return path.lastIndexOf('/') > 0 ? path.slice(0, path.lastIndexOf('/') + 1) : '/'

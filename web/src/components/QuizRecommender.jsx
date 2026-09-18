@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import SmartImage from './SmartImage'
+import NavLink from './NavLink'
 import { apiUrlWithLang, posterFor } from '../api'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
 const DECADES = ['any', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s']
@@ -69,7 +71,7 @@ function StepIndicator({ current }) {
   )
 }
 
-export default function QuizRecommender({ onPick }) {
+export default function QuizRecommender() {
   const { t } = useI18n()
   const [step, setStep] = useState(0)
   const [kind, setKind] = useState('movie')
@@ -272,17 +274,12 @@ export default function QuizRecommender({ onPick }) {
                 )}
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {!result._tmdbOnly && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        result.kind === 'tv'
-                          ? onPick('tv', result.id)
-                          : onPick('movie', result.id)
-                      }
-                      className="flex-1 bg-black px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-zinc-800 sm:flex-none"
+                    <NavLink
+                      to={titleUrl(result.kind, result.id, result.title)}
+                      className="flex-1 bg-black px-4 py-2.5 text-center text-xs font-semibold text-white transition hover:bg-zinc-800 sm:flex-none"
                     >
                       {t('quiz.viewDetails')}
-                    </button>
+                    </NavLink>
                   )}
                   <button
                     type="button"
