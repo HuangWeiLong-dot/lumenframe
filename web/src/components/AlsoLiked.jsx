@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import SmartImage from './SmartImage'
 import StatusBadge from './StatusBadge'
+import NavLink from './NavLink'
 import { apiUrlWithLang, posterFor } from '../api'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
 // "看过这个的还喜欢"：基于 TasteDive 协同过滤推荐（与基于类别的 More Like This 互补）
-export default function AlsoLiked({ movie, onSelect, embed = false }) {
+export default function AlsoLiked({ movie, embed = false }) {
   const { t, apiLang } = useI18n()
   const id = movie?.id
   const kind = movie?.kind === 'tv' ? 'tv' : 'movie'
@@ -89,10 +91,9 @@ export default function AlsoLiked({ movie, onSelect, embed = false }) {
                 'w185'
               )
               return (
-                <button
+                <NavLink
                   key={`${itemKind}:${itemId}`}
-                  type="button"
-                  onClick={() => onSelect?.(itemKind, itemId)}
+                  to={titleUrl(itemKind, itemId, m.title)}
                   className="group text-left"
                   title={m.title}
                 >
@@ -109,7 +110,7 @@ export default function AlsoLiked({ movie, onSelect, embed = false }) {
                     {m.title}
                   </p>
                   <p className="text-[11px] text-zinc-500">{m.year || '—'}</p>
-                </button>
+                </NavLink>
               )
             })}
           </div>

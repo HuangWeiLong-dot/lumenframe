@@ -21,14 +21,25 @@ export function resolveSpaRedirect() {
   window.history.replaceState(null, '', path)
 }
 
+// 站内一级路由段。与 public/404.html 的 detectRoot 是同一份判据，改一处必须改另一处。
+const ROUTE_SEGMENTS = new Set(['movie', 'tv', 'person', 'genre', 'library'])
+
 // 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
-// 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
+// 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾。
+//
+// 必须按**路径分段**找第一个路由段，不能用 /(movie|tv)\// 这类子串匹配：
+//   /<repo>/person/123-tom-hanks   → 子串法返回 /<repo>/person/（错）
+//   /<repo>/genre/movie/18-action  → 子串法返回 /<repo>/genre/（错，先命中 genre 里的 movie）
+// BASE_PATH 是模块求值期冻结的常量，算错一次之后每个链接都是 /<repo>/person/movie/123 这种垃圾。
 export function getBasePath() {
+  const segs = window.location.pathname.split('/')
+  // segs[0] 恒为空串，从 1 开始；命中第一个路由段就截断到它之前
+  for (let i = 1; i < segs.length; i++) {
+    if (ROUTE_SEGMENTS.has(segs[i])) return i === 1 ? '/' : '/' + segs.slice(1, i).join('/') + '/'
+  }
+  // 没有任何路由段（根路径、或已带尾斜杠的仓库根）：沿用原来的兜底
   const p = window.location.pathname
-  const m = p.match(/\/(movie|tv)\//)
-  if (m) return p.slice(0, m.index + 1)
-  if (p.endsWith('/')) return p
-  return p.slice(0, p.lastIndexOf('/') + 1)
+  return p.endsWith('/') ? p : p.slice(0, p.lastIndexOf('/') + 1)
 }
 
 export const BASE_PATH = getBasePath()

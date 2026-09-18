@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { posterFor, apiUrl } from '../api'
 import { useLibrary } from '../hooks/useLibrary'
 import { useI18n } from '../i18n'
+import { titleUrl, personUrl, genreUrl } from '../routes'
 import LibraryStats from './LibraryStats'
+import NavLink from './NavLink'
 import SmartImage from './SmartImage'
 import StatusBadge from './StatusBadge'
 
@@ -33,28 +35,28 @@ function fixPosterUrl(poster) {
   return poster
 }
 
-function TitleCard({ item, list, onOpen, onRemove }) {
+function TitleCard({ item, list, onRemove }) {
   const { t } = useI18n()
   const isTv = item.kind === 'tv'
   const poster = posterFor(item, 'w185')
+  const to = titleUrl(item.kind || 'movie', item.id, item.title)
   return (
     <div className="group flex gap-3 border border-zinc-200 p-3 transition hover:border-zinc-400">
       <div className="relative w-16 shrink-0">
-        <div className="aspect-[2/3] w-full overflow-hidden bg-zinc-100">
+        <NavLink to={to} className="block aspect-[2/3] w-full overflow-hidden bg-zinc-100">
           <SmartImage
             src={poster}
             alt={item.title}
             crossOrigin="anonymous"
             objectFit="cover"
             className="h-full w-full cursor-pointer"
-            onClick={() => onOpen(item.kind || 'movie', item.id)}
           />
-        </div>
+        </NavLink>
         <StatusBadge kind={item.kind || 'movie'} id={item.id} size="sm" />
       </div>
       <div className="min-w-0 flex-1">
-        <button
-          onClick={() => onOpen(item.kind || 'movie', item.id)}
+        <NavLink
+          to={to}
           className="block truncate text-left text-sm font-semibold text-zinc-900 hover:underline"
           title={item.title}
         >
@@ -65,7 +67,7 @@ function TitleCard({ item, list, onOpen, onRemove }) {
           )}
           {item.title}
           {item.year && <span className="ml-1.5 font-normal text-zinc-500">{item.year}</span>}
-        </button>
+        </NavLink>
         <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs text-zinc-500">
           {list === 'watched' && item.myRating > 0 && (
             <span className="font-semibold text-amber-600">★ {item.myRating}</span>
@@ -105,30 +107,27 @@ function TitleCard({ item, list, onOpen, onRemove }) {
   )
 }
 
-function LikeCard({ item, onOpen, onOpenPerson, onOpenGenre, onRemove }) {
+function LikeCard({ item, onRemove }) {
   const { t } = useI18n()
   const isTitle = item.type === 'movie' || item.type === 'tv'
-  // 旧 genre like 数据可能缺 kind 字段 → 禁用点击
+  // 旧 genre like 数据可能缺 kind 字段 → 拼不出 URL，禁用点击
   const genreDisabled = item.type === 'genre' && !item.kind
 
-  const handleOpen = () => {
-    if (item.type === 'movie' || item.type === 'tv') {
-      onOpen(item.type, item.id)
-    } else if (item.type === 'person') {
-      onOpenPerson?.({ id: item.id, name: item.name, source: 'tmdb' })
-    } else if (item.type === 'genre' && !genreDisabled) {
-      onOpenGenre?.(item.kind, item.id, item.name)
-    }
-  }
+  // 三类点赞各自的落地页：片子 / 演职员 / 类型
+  const to = isTitle
+    ? titleUrl(item.type, item.id, item.name)
+    : item.type === 'person'
+      ? personUrl(item.id, item.name)
+      : item.type === 'genre' && !genreDisabled
+        ? genreUrl(item.kind, item.id, item.name)
+        : null
 
-  const clickable = isTitle || item.type === 'person' || (item.type === 'genre' && !genreDisabled)
+  const className = `group flex items-center gap-3 border border-zinc-200 p-3 transition hover:border-zinc-400 ${to ? 'cursor-pointer' : 'cursor-default'}`
+  const title = genreDisabled ? t('library.genreMissingKind') : undefined
 
-  return (
-    <div
-      className={`group flex items-center gap-3 border border-zinc-200 p-3 transition hover:border-zinc-400 ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
-      onClick={clickable ? handleOpen : undefined}
-      title={genreDisabled ? t('library.genreMissingKind') : undefined}
-    >
+  // 卡片内容两态共用；区别只在最外层是「能新标签页打开的链接」还是「不可点的 div」
+  const body = (
+    <>
       <div className="relative shrink-0">
         {item.poster ? (
           <SmartImage
@@ -161,8 +160,10 @@ function LikeCard({ item, onOpen, onOpenPerson, onOpenGenre, onRemove }) {
           {item.type === 'tv' && item.yearRange ? item.yearRange : ''}
         </p>
       </div>
+      {/* 移除按钮嵌在可点容器内部：必须 preventDefault，否则点「移除」会顺手开一个新标签页 */}
       <button
-        onClick={(e) => { e.stopPropagation(); onRemove() }}
+        type="button"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove() }}
         aria-label={t('library.removeFromLikes')}
         className="flex h-7 w-7 shrink-0 items-center justify-center text-zinc-400 transition hover:bg-black hover:text-white"
       >
@@ -171,11 +172,16 @@ function LikeCard({ item, onOpen, onOpenPerson, onOpenGenre, onRemove }) {
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
-    </div>
+    </>
   )
+
+  if (!to) {
+    return <div className={className} title={title}>{body}</div>
+  }
+  return <NavLink to={to} className={className} title={title}>{body}</NavLink>
 }
 
-export default function LibraryPage({ onOpenTitle, onOpenPerson, onOpenGenre, onGoHome }) {
+export default function LibraryPage({ onGoHome }) {
   const [tab, setTab] = useState('watched')
   const { t } = useI18n()
   // 解构带默认值：即使存储层返回的数据形状异常（如 localStorage 被禁用），列表也不会是 undefined
@@ -279,9 +285,6 @@ export default function LibraryPage({ onOpenTitle, onOpenPerson, onOpenGenre, on
                         <LikeCard
                           key={`${item.type}:${item.id}`}
                           item={item}
-                          onOpen={onOpenTitle}
-                          onOpenPerson={onOpenPerson}
-                          onOpenGenre={onOpenGenre}
                           onRemove={() => removeFromLikes(item.type, item.id)}
                         />
                       ))}
@@ -314,7 +317,6 @@ export default function LibraryPage({ onOpenTitle, onOpenPerson, onOpenGenre, on
                 key={`${item.kind || 'movie'}:${item.id}`}
                 item={item}
                 list={tab}
-                onOpen={onOpenTitle}
                 onRemove={handleRemove}
               />
             ))}

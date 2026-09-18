@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import NavLink from './NavLink'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
 // 收藏栏（Pin）的响应式形态（条目不展示海报，只列标题/年份）：
@@ -41,7 +43,7 @@ function Chevron({ dir = 'right', size = 12 }) {
 }
 
 // ≥ sm：导轨行（不展示海报：标题 + 年份 + 取消收藏）
-function RailPinRow({ entry, fresh, onPick, onUnpin }) {
+function RailPinRow({ entry, fresh, onUnpin }) {
   const { t } = useI18n()
   const year = entry.kind === 'tv' ? entry.yearRange || entry.year || '' : entry.year || ''
 
@@ -51,9 +53,8 @@ function RailPinRow({ entry, fresh, onPick, onUnpin }) {
         fresh ? 'animate-[pin-slide-in_380ms_cubic-bezier(0.22,1,0.36,1)]' : ''
       }`}
     >
-      <button
-        type="button"
-        onClick={() => onPick?.(entry)}
+      <NavLink
+        to={titleUrl(entry.kind, entry.id, entry.title)}
         title={entry.title}
         className="flex min-w-0 flex-1 flex-col items-start text-left"
       >
@@ -62,7 +63,7 @@ function RailPinRow({ entry, fresh, onPick, onUnpin }) {
           {year}
           {entry.kind === 'tv' && <span className="ml-1 text-zinc-400">{t('common.tv')}</span>}
         </span>
-      </button>
+      </NavLink>
       {/* 取消收藏：触屏设备没有 hover，所以常显 */}
       <button
         type="button"
@@ -78,7 +79,9 @@ function RailPinRow({ entry, fresh, onPick, onUnpin }) {
 }
 
 // < sm：底部抽屉行（不展示海报：标题 + 年份 + 取消收藏）
-function SheetPinRow({ entry, fresh, onPick, onUnpin }) {
+// onClick：手机端点击条目时先收起抽屉，避免抽屉盖住刚打开的详情页。
+// 注意这不是跳转——跳转由 NavLink 的 href 交给浏览器新标签页完成，当前页不动。
+function SheetPinRow({ entry, fresh, onClick, onUnpin }) {
   const { t } = useI18n()
   const year = entry.kind === 'tv' ? entry.yearRange || entry.year || '' : entry.year || ''
 
@@ -88,10 +91,10 @@ function SheetPinRow({ entry, fresh, onPick, onUnpin }) {
         fresh ? 'animate-[pin-slide-in_380ms_cubic-bezier(0.22,1,0.36,1)]' : ''
       }`}
     >
-      <button
-        type="button"
-        onClick={() => onPick?.(entry)}
+      <NavLink
+        to={titleUrl(entry.kind, entry.id, entry.title)}
         title={entry.title}
+        onClick={onClick}
         className="flex min-w-0 flex-1 flex-col items-start text-left active:opacity-60"
       >
         <span className="w-full truncate text-sm font-semibold text-zinc-900">{entry.title}</span>
@@ -99,7 +102,7 @@ function SheetPinRow({ entry, fresh, onPick, onUnpin }) {
           {year}
           {entry.kind === 'tv' && <span className="ml-1 text-zinc-400">{t('common.tv')}</span>}
         </span>
-      </button>
+      </NavLink>
       <button
         type="button"
         onClick={() => onUnpin?.(entry)}
@@ -113,7 +116,7 @@ function SheetPinRow({ entry, fresh, onPick, onUnpin }) {
   )
 }
 
-export default function PinnedDrawer({ pinned = [], onPick, onUnpin }) {
+export default function PinnedDrawer({ pinned = [], onUnpin }) {
   const { t } = useI18n()
   // 展开状态：导轨把手 / 手机抽屉入口显式控制；桌面鼠标悬停也走这里，不再用 CSS hover
   const [open, setOpen] = useState(false)
@@ -227,7 +230,6 @@ export default function PinnedDrawer({ pinned = [], onPick, onUnpin }) {
                   key={keyOf(p)}
                   entry={p}
                   fresh={fresh}
-                  onPick={onPick}
                   onUnpin={onUnpin}
                 />
               ))}
@@ -282,8 +284,7 @@ export default function PinnedDrawer({ pinned = [], onPick, onUnpin }) {
               key={keyOf(p)}
               entry={p}
               fresh={fresh}
-              // 手机端点击条目：先收起抽屉再跳转，避免抽屉盖住刚打开的详情页
-              onPick={(entry) => { handleCollapse(); onPick?.(entry) }}
+              onClick={handleCollapse}
               onUnpin={onUnpin}
             />
           ))}

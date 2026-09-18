@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import SmartImage from './SmartImage'
 import StatusBadge from './StatusBadge'
+import NavLink from './NavLink'
 import { apiUrlWithLang, posterUrl } from '../api'
+import { titleUrl, preopenTab, setTabUrl, closeTab } from '../routes'
 import { useI18n } from '../i18n'
 
 function formatLifeSpan(birth, death) {
@@ -14,9 +16,16 @@ function formatLifeSpan(birth, death) {
 function WorkCard({ work, onOpen }) {
   const { t } = useI18n()
   const poster = work.poster_path ? posterUrl(work.poster_path, 'w185') : null
+  // 电影：work.id 就是本站用的 TMDB id，能直接拼 href → 真 <a>，新标签页。
+  // 剧集：work.id 是 TMDB id，本站用的是 TVmaze id，得先按片名搜，只能走 onOpen 异步处理。
+  const isMovie = work.kind !== 'tv'
+  const Tag = isMovie ? NavLink : 'button'
+  const linkProps = isMovie
+    ? { to: titleUrl('movie', work.id, work.title) }
+    : { type: 'button', onClick: () => onOpen(work) }
   return (
-    <button
-      onClick={() => onOpen(work)}
+    <Tag
+      {...linkProps}
       className="group flex flex-col gap-1 text-left"
       title={`${work.title}${work.year ? ` (${work.year})` : ''}`}
     >
@@ -48,7 +57,7 @@ function WorkCard({ work, onOpen }) {
       {work.vote_average > 0 && (
         <p className="text-[11px] font-semibold text-amber-600">★ {work.vote_average.toFixed(1)}</p>
       )}
-    </button>
+    </Tag>
   )
 }
 
@@ -82,7 +91,7 @@ function RoleSection({ title, movies, tv, onOpen }) {
   )
 }
 
-export default function PersonPage({ personId, isInLikes, toggleLike, onBack, onOpenMovie, onOpenShow }) {
+export default function PersonPage({ personId, isInLikes, toggleLike, onBack, onOpenShow }) {
   const { t, apiLang } = useI18n()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -110,26 +119,26 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
     // apiLang：切换语言后重新拉取（简介、作品片名随语言变化）
   }, [personId, apiLang])
 
-  // 点击作品：电影直接打开，TV（来自 TMDB id）需通过标题搜索 TVmaze 找到本地 ID 再打开
+  // 剧集作品：work.id 是 TMDB id，与本站使用的 TVmaze id 不一致，先按 title+year 搜到再打开。
+  // 电影的作品卡片本身就是 <NavLink>（同步能拼出 href），走不到这里。
   async function handleOpenWork(work) {
-    if (work.kind === 'movie') {
-      onOpenMovie(work.id, { history: 'push' })
-      return
-    }
-    // TV：TMDB id 与本站使用的 TVmaze id 不一致，先按 title+year 搜索
+    // 先在点击的同步阶段占一个标签页：下面的 await 之后调用栈已退出点击事件，
+    // 那时再 window.open 会被弹窗拦截
+    const tab = preopenTab()
     // 用原名（original_title）搜：TVmaze 只有英文名，中文界面下的本地化剧名匹配不到
     try {
       const qs = new URLSearchParams({ q: work.original_title || work.title, limit: '3' })
       const r = await fetch(apiUrlWithLang(`/api/search?${qs}`))
-      if (!r.ok) return
+      if (!r.ok) { closeTab(tab); return }
       const data = await r.json()
       const candidates = (data.results || []).filter((m) => m.kind === 'tv')
       const match = candidates.find((m) => m.year === work.year) || candidates[0]
-      if (match) {
-        onOpenShow(match.id, { history: 'push' })
-      }
+      if (!match) { closeTab(tab); return }
+      // tab 为 null = 被弹窗拦截，退回原地跳转
+      if (tab) setTabUrl(tab, titleUrl('tv', match.id, match.title))
+      else onOpenShow(match.id, { history: 'push' })
     } catch {
-      /* swallow */
+      closeTab(tab)
     }
   }
 

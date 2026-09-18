@@ -2,6 +2,8 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTrending } from '../hooks/useTrending'
 import { posterUrl } from '../api'
 import StatusBadge from './StatusBadge'
+import NavLink from './NavLink'
+import { titleUrl } from '../routes'
 import { useI18n } from '../i18n'
 
 const GAP = 8
@@ -64,7 +66,7 @@ function pack(movies, cols, chunks) {
   return items
 }
 
-export default function MovieCollage({ onPick }) {
+export default function MovieCollage() {
   const { t } = useI18n()
   const trending = useTrending()
   const wrapRef = useRef(null)
@@ -127,9 +129,9 @@ export default function MovieCollage({ onPick }) {
             }}
           >
             {items.map(({ m, col, row, cs, rs }) => (
-              <button
+              <NavLink
                 key={m.id}
-                onClick={() => onPick(m.id)}
+                to={titleUrl(m.kind || 'movie', m.id, m.title)}
                 className="group relative overflow-hidden bg-zinc-100 text-left transition"
                 style={{
                   gridColumn: `${col} / span ${cs}`,
@@ -155,7 +157,7 @@ export default function MovieCollage({ onPick }) {
                 >
                   {m.title}
                 </span>
-              </button>
+              </NavLink>
             ))}
           </div>
         </div>
