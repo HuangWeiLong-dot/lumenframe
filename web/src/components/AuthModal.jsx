@@ -119,7 +119,10 @@ export default function AuthModal() {
 
   function statusLine() {
     if (sync.state === 'syncing') return t('sync.syncing')
-    if (sync.state === 'error') return t('sync.error')
+    // retryAt 非空 = 引擎还会自己再试；为空 = 自动重试已用完，只能点右边按钮
+    if (sync.state === 'error') {
+      return sync.retryAt ? t('sync.retrying', { n: sync.attempt }) : t('sync.error')
+    }
     // 熔断：这一轮有一批删除被扣下，等用户确认（见 engine 的 requestSync）
     if (sync.state === 'guard') return t('sync.guardBlocked', { n: sync.blockedDeletes })
     if (sync.lastSyncedAt) {

@@ -6,10 +6,10 @@ import {
 import { subscribePinned, getPinnedState, applyRemotePinned } from '../hooks/usePinned'
 import { subscribeAuth, getAuthState } from '../auth/store'
 import { safeGetJSON, safeSet, safeSetJSON, getChangeOrigin } from '../storage'
-import { project, toLocal, toRows, fromRows, canon } from './projection.js'
+import { project, toLocal, toRows, fromRows, canon, NOTES } from './projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
-  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys,
+  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys, retryDelay,
 } from './merge.js'
 
 const META_KEY = 'lumenframe:sync:meta'
@@ -32,6 +32,12 @@ let running = false
 let pendingSync = false
 let lastPullAt = 0
 
+// 连续失败次数 + 待触发的重试定时器。
+// 刻意用定时器而不是在 catch 里直接递归调 syncNow：那一刻 running 还是 true，
+// 直接调只会置上 pendingSync、再由 finally 立刻重跑一次——永久性错误就变成死循环。
+let failCount = 0
+let retryTimer = null
+
 // 上一轮是不是扣下了一批删除（= 状态停在 guard）。单独记一个布尔而不是读 statusState：
 // 用户点「确认」时可能正好有一轮在跑（状态是 syncing），读状态会把这次确认吞掉。
 let pendingGuard = false
@@ -43,7 +49,12 @@ let forceDeletes = false
 
 // ---- 状态 store（供 UI 订阅）----
 
-let statusState = { state: 'off', lastSyncedAt: null, error: null, blockedDeletes: 0 }
+let statusState = {
+  state: 'off', lastSyncedAt: null, error: null, blockedDeletes: 0,
+  // attempt / retryAt 只在 error 状态下有意义：失败了几次、下次自动重试的时刻。
+  // retryAt === null 且 state === 'error' = 自动重试已用完，只能用户手动点。
+  attempt: 0, retryAt: null,
+}
 const statusListeners = new Set()
 
 function setStatus(patch) {
@@ -153,10 +164,20 @@ function record() {
 
 // 首次见到某个条目时用 addedAt 播种（而不是 now）：
 // 否则首次登录时本地每一条都会「比云端新」，把对方设备上真正的修改全部压掉。
-// notes / pinned 没有 addedAt，取 0 = 年龄不详，输给任何一条远端记录。
-function seedMeta(projected) {
+//
+// 短评是唯一的例外，由 rescueUntimedNotes 打开：升级前的短评本地存的是裸字符串，
+// 根本没有任何时间信息（见 useLibrary.normalizeNote），一律播成 0 就等于「首次登录必输」。
+// 对**本机从未同步过任何账号**的设备（meta.scope == null）改播 now，把这批旧短评救回来。
+// 代价是这台设备首次登录时它们会赢过云端同一条——一次性，且只影响这一台设备。
+function seedMeta(projected, rescueUntimedNotes = false) {
+  const now = Date.now()
   for (const [key, payload] of Object.entries(projected)) {
-    if (!(key in meta.meta)) meta.meta[key] = { ts: payload?.addedAt || 0 }
+    if (key in meta.meta) continue
+    if (rescueUntimedNotes && !payload?.addedAt && key.startsWith(`${NOTES}:`)) {
+      meta.meta[key] = { ts: now }
+    } else {
+      meta.meta[key] = { ts: payload?.addedAt || 0 }
+    }
   }
 }
 
@@ -215,6 +236,7 @@ async function syncNow() {
     if (reset) {
       meta = { scope, meta: {} }
       prevProjection = null
+      clearRetry() // 换账号：上一个账号的失败退避不该拖累这个账号
     } else if (meta.scope !== scope) {
       meta.scope = scope
       persistMeta()
@@ -272,14 +294,25 @@ async function syncNow() {
     // 扣下删除时状态停在 guard，而且本地的墓碑还在 meta 里——下一轮会再次触发熔断。
     // 这是刻意的：用户没确认之前它就该一直亮着。
     pendingGuard = blocked > 0
+    clearRetry()
     setStatus({
       state: blocked ? 'guard' : 'idle',
       lastSyncedAt: Date.now(),
       error: null,
       blockedDeletes: blocked,
+      attempt: 0,
+      retryAt: null,
     })
   } catch (e) {
-    setStatus({ state: 'error', error: e?.message || 'sync failed' })
+    failCount++
+    // ⚠ 此刻 running 仍是 true：只能排定时器，绝不能直接 syncNow
+    const delay = scheduleRetry()
+    setStatus({
+      state: 'error',
+      error: e?.message || 'sync failed',
+      attempt: failCount,
+      retryAt: delay == null ? null : Date.now() + delay,
+    })
   } finally {
     running = false
     if (pendingSync) { pendingSync = false; syncNow() }
@@ -295,6 +328,26 @@ function scheduleSync() {
     debounceTimer = null
     syncNow()
   }, DEBOUNCE_MS)
+}
+
+// ---- 失败重试 ----
+
+// 排下一次自动重试，返回等待毫秒数；null = 已经试满次数，不再自动重试
+function scheduleRetry() {
+  if (retryTimer) return null // 已排就不重排：连续失败沿用原定节奏，不累加
+  const delay = retryDelay(failCount)
+  if (delay == null) return null
+  retryTimer = setTimeout(() => {
+    retryTimer = null
+    syncNow()
+  }, delay)
+  return delay
+}
+
+// 成功 / 登出 / 换账号 / 用户手动重试：撤掉定时器并把失败计数归零
+function clearRetry() {
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+  failCount = 0
 }
 
 // ---- 多标签页：只让一个标签页负责同步 ----
@@ -326,7 +379,8 @@ function onAuthChange() {
   const { user, ready } = getAuthState()
   if (!ready) return
   if (!user) {
-    setStatus({ state: 'off', error: null, blockedDeletes: 0 })
+    clearRetry() // 登出后不该再为上一个账号重试
+    setStatus({ state: 'off', error: null, blockedDeletes: 0, attempt: 0, retryAt: null })
     return
   }
   syncNow()
@@ -345,7 +399,9 @@ export function initSync() {
 
   meta = loadMeta()
   prevProjection = project(currentLocal())
-  seedMeta(prevProjection)
+  // meta.scope == null = 本机从未同步过任何账号 → 这次登录是「访客数据认领」，
+  // 顺手把升级前就存在、没有时间戳的旧短评一起救回来（见 seedMeta）
+  seedMeta(prevProjection, meta.scope == null)
 
   subscribeLibrary(record)
   subscribePinned(record)
@@ -359,8 +415,10 @@ export function initSync() {
 }
 
 // 供 UI 的「立即同步」按钮使用。
-// guard 状态下点它是**二次确认**：放行上一轮被扣下的那批删除（只对一轮生效）。
+// guard 状态下点它是**二次确认**：放行上一轮被扣下的那批删除（只对一轮生效）；
+// error 状态下点它是**手动重试**：撤掉自动重试的定时器与计数，立刻再试一次。
 export function requestSync() {
   if (pendingGuard) forceDeletes = true
+  clearRetry()
   return syncNow()
 }

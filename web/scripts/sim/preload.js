@@ -41,6 +41,8 @@ if (CASE) {
   // 访客在更早的一次会话里收藏的：addedAt 很老，meta 里没有时间戳
   // → 首次同步靠 seedMeta 拿 addedAt 播种（正是「首次播种用 addedAt」那条路径）
   setLib([{ kind: 'movie', id: 100, title: 'Dune（本地旧副本）', year: 2021, addedAt: NOW - 48 * DAY, myRating: 7 }])
-  // 短评没有 addedAt：播种成 0 = 年龄不详，输给任何一条远端记录
+  // 短评刻意写成旧版**裸字符串**形态（升级前就在本机、没有任何时间信息的那批）。
+  // 首次同步时 seedMeta 的 rescueUntimedNotes 会把它播种成 now 而不是 0，
+  // 于是本机能盖过云端 2026-03-01 那条（见 engine.js 的 seedMeta 与 run.js 的断言）。
   localStorage.setItem('lumenframe:notes', JSON.stringify({ 'movie:100': '本地写的短评' }))
 }

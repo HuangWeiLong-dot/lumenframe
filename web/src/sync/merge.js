@@ -121,6 +121,20 @@ export function computeDirty(merged, remote) {
   return dirty
 }
 
+// ---- 同步失败退避 ----
+//
+// 纯决策，放这里是为了能用 check-sync.mjs 直接断言；定时器接线在 engine.js，
+// 由 scripts/sim 的 retry 场景覆盖。
+
+export const RETRY_DELAYS = [3e3, 10e3, 30e3, 60e3, 300e3] // 3s → 10s → 30s → 1min → 5min 封顶
+
+// 第 attempt 次**连续失败**后该等多久才重试；null = 自动重试已用完。
+// 5 分钟封顶保证不打出密集请求，次数上限保证永久性错误（RLS 401 / JWT 失效）
+// 不会永远重试下去——那种情况得用户自己点「重试」或重新登录。
+export function retryDelay(attempt) {
+  return RETRY_DELAYS[attempt - 1] ?? null
+}
+
 // ---- 批量删除熔断 ----
 //
 // 删除是「本地记墓碑 + 推上云端」，所以一份被污染的 sync:meta 能一次性清掉整个云端片库：

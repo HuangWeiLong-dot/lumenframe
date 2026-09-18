@@ -434,6 +434,7 @@ export default {
   'sync.lastSynced': 'Last synced {time}',
   'sync.never': 'Not synced yet',
   'sync.error': 'Sync failed',
+  'sync.retrying': 'Sync failed, retrying (attempt {n})',
   'sync.retry': 'Retry',
   'sync.now': 'Sync now',
   'sync.guardBlocked': '{n} deletions held back',

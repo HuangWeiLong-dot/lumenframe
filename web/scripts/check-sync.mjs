@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { project, toLocal, fromRows, toRows, canon, listKey } from '../src/sync/projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
-  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys,
+  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys, retryDelay,
 } from '../src/sync/merge.js'
 
 let passed = 0
@@ -49,6 +49,47 @@ check('likes 用 type 寻址，不能用 kind（genre 的 kind 是 movie/tv，�
 check('notes 键拆成 kind + id', () => {
   const p = project({ library: { watched: [], watchlater: [], likes: [] }, notes: { 'movie:157336': '好看' }, pinned: [] })
   assert.deepEqual(p[listKey('notes', 'movie', 157336)], { text: '好看' })
+})
+
+check('短评的 addedAt 进投影（否则首次同步播种成 0，本地短评必输给云端）', () => {
+  const p = project({
+    library: { watched: [], watchlater: [], likes: [] },
+    notes: { 'movie:100': { text: '本地写的短评', addedAt: 1756000000000 } },
+    pinned: [],
+  })
+  assert.deepEqual(p[listKey('notes', 'movie', 100)], { text: '本地写的短评', addedAt: 1756000000000 })
+})
+
+check('无 addedAt 的旧短评不写这个键（保持与旧版载荷逐字节一致，不触发无意义重推）', () => {
+  const p = project({
+    library: { watched: [], watchlater: [], likes: [] },
+    notes: { 'movie:100': { text: '旧的', addedAt: 0 } },
+    pinned: [],
+  })
+  assert.deepEqual(p[listKey('notes', 'movie', 100)], { text: '旧的' })
+})
+
+check('短评往返保留 addedAt（不然每轮同步都反复重写短评 store）', () => {
+  const current = {
+    library: { watched: [], watchlater: [], likes: [] },
+    notes: { 'movie:1': { text: 'A', addedAt: 500 } },
+    pinned: [],
+  }
+  const projected = project(current)
+  const merged = mergeStates(
+    buildLocalState(projected, { [listKey('notes', 'movie', 1)]: { ts: 500 } }),
+    {}
+  )
+  const back = toLocal(merged, current)
+  assert.deepEqual(back.notes['movie:1'], { text: 'A', addedAt: 500 })
+  // 关键：写回去的结构投影出来必须与原来逐字节相同，否则每轮都判「变了」→ 反复重写
+  assert.equal(canon(project(back)), canon(projected))
+})
+
+check('失败退避：3s → 10s → 30s → 1min → 5min，用完就停手', () => {
+  assert.deepEqual([1, 2, 3, 4, 5].map(retryDelay), [3000, 10000, 30000, 60000, 300000])
+  assert.equal(retryDelay(6), null)
+  assert.equal(retryDelay(0), null)
 })
 
 check('pinned 往返（project -> buildLocalState -> merge -> toLocal）', () => {
