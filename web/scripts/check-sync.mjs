@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import { project, toLocal, fromRows, toRows, canon, listKey } from '../src/sync/projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
+  recordChanges, persistableMeta,
 } from '../src/sync/merge.js'
 
 let passed = 0
@@ -219,6 +220,98 @@ check('换账号才丢弃 meta；访客（scope=null）的墓碑必须保留', (
   const guestMeta = { [k]: { ts: 500, deleted: true } }
   const merged = mergeStates(buildLocalState({}, guestMeta), { [k]: { ts: 100, payload: { title: 'A' } } })
   assert.equal(merged[k].deleted, true)
+})
+
+// ---- 清空本地存储（设备上「删除网站所有信息」）绝不能删掉云端整库 ----
+
+check('外部清空本地存储不记墓碑（否则清一次站点数据就把云端整库删了）', () => {
+  const a = listKey('watched', 'movie', 1)
+  const b = listKey('watched', 'movie', 2)
+  const prev = { [a]: { title: 'A' }, [b]: { title: 'B' } }
+
+  // storage 事件重读导致内存 store 变空：一条墓碑都不能记
+  const wiped = recordChanges(prev, {}, 1000, true)
+  assert.deepEqual(wiped.patch, {})
+  assert.equal(wiped.vanished, true)
+
+  // 本页用户逐条删除：照旧记墓碑
+  const userDeleted = recordChanges(prev, {}, 1000, false)
+  assert.deepEqual(userDeleted.patch[a], { ts: 1000, deleted: true })
+  assert.deepEqual(userDeleted.patch[b], { ts: 1000, deleted: true })
+  assert.equal(userDeleted.vanished, true)
+})
+
+check('外部清空后拉回云端：整库落地，一条都不被判成删除', () => {
+  const a = listKey('watched', 'movie', 1)
+  const b = listKey('watched', 'movie', 2)
+  const { patch } = recordChanges({ [a]: { title: 'A' }, [b]: { title: 'B' } }, {}, 1000, true)
+
+  // 清空那一刻的 meta 与投影（meta 里只剩「活着但投影没有」的历史键，不是墓碑）
+  const metaAfterWipe = { [a]: { ts: 100 }, [b]: { ts: 100 }, ...patch }
+  const remote = { [a]: { ts: 400, payload: { title: 'A' } }, [b]: { ts: 500, payload: { title: 'B' } } }
+
+  const merged = mergeStates(buildLocalState({}, metaAfterWipe), remote)
+  assert.equal(merged[a].deleted, undefined)
+  assert.equal(merged[b].deleted, undefined)
+  assert.equal(toLocal(merged, {}).library.watched.length, 2)
+  assert.deepEqual(computeDirty(merged, remote), [])   // 也没有墓碑要被推上去
+})
+
+check('外部改写里的新增/修改照旧记录（只有「消失」需要区分来源）', () => {
+  const a = listKey('watched', 'movie', 1)
+  const b = listKey('watched', 'movie', 2)
+  const { patch } = recordChanges(
+    { [a]: { title: 'A' } },
+    { [a]: { title: 'A2' }, [b]: { title: 'B' } },
+    1000,
+    true
+  )
+  assert.deepEqual(patch[a], { ts: 1000 })
+  assert.deepEqual(patch[b], { ts: 1000 })
+})
+
+check('写 meta 时与磁盘逐键合并：别的标签页刚记的墓碑不能被陈旧副本抹掉', () => {
+  const k = listKey('watched', 'movie', 1)
+  const other = listKey('watched', 'movie', 2)
+  // 磁盘上：A 标签页刚删了 k；本页内存里 k 还是老时间戳
+  const disk = { scope: 'u', meta: { [k]: { ts: 900, deleted: true } } }
+  const local = { scope: 'u', meta: { [k]: { ts: 100 }, [other]: { ts: 500 } } }
+
+  const out = persistableMeta(disk, local)
+  assert.equal(out.meta[k].deleted, true)     // 墓碑活下来
+  assert.equal(out.meta[k].ts, 900)
+  assert.equal(out.meta[other].ts, 500)       // 本页的新条目也在
+})
+
+check('另一个标签页删掉的条目，本页同步时不得复活（墓碑要靠磁盘合并拿到）', () => {
+  const k = listKey('watched', 'movie', 1)
+  const remote = { [k]: { ts: 400, payload: { title: 'A' } } }
+
+  // 本页内存里的 meta 是陈旧的（没有墓碑）——只靠它会得出「远端还有，照抄」
+  const stale = { scope: 'u', meta: { [k]: { ts: 100 } } }
+  assert.equal(mergeStates(buildLocalState({}, stale.meta), remote)[k].deleted, undefined)
+
+  // 合并磁盘后拿到对方刚记的墓碑，删除才立得住、并且会被推上云端
+  const disk = { scope: 'u', meta: { [k]: { ts: 900, deleted: true } } }
+  const merged = mergeStates(buildLocalState({}, persistableMeta(disk, stale).meta), remote)
+  assert.equal(merged[k].deleted, true)
+  assert.deepEqual(computeDirty(merged, remote), [k])
+})
+
+check('meta 落盘：磁盘上是另一个账号才整体覆盖；访客态必须保留', () => {
+  const k = listKey('watched', 'movie', 1)
+  const disk = { scope: 'user-A', meta: { [k]: { ts: 9, deleted: true } } }
+
+  // 换账号（B 转正）：上一账号的墓碑不能带过来
+  assert.deepEqual(persistableMeta(disk, { scope: 'user-B', meta: {} }).meta, {})
+  // 同账号：合并
+  assert.equal(persistableMeta(disk, { scope: 'user-A', meta: {} }).meta[k].deleted, true)
+  // 访客态磁盘（scope = null，用户正在「认领」这份数据）：合并，不能丢墓碑
+  assert.equal(
+    persistableMeta({ scope: null, meta: { [k]: { ts: 9, deleted: true } } }, { scope: 'user-B', meta: {} })
+      .meta[k].deleted,
+    true
+  )
 })
 
 check('网络往返期间的新增不会被写回时抹掉（快照必须在 await 之后取）', () => {

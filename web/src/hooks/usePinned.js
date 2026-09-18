@@ -1,6 +1,6 @@
 import { useSyncExternalStore, useCallback } from 'react'
 import { posterFor } from '../api'
-import { safeGetJSON, safeSet } from '../storage'
+import { safeGetJSON, safeSet, setChangeOrigin } from '../storage'
 
 const KEY = 'lumenframe:pinned:v1'
 const MAX_PINS = 6
@@ -42,8 +42,10 @@ function notify() {
 }
 
 // 从存储重读（storage 事件：其它标签页写入后同步）
+// 标记来源为 external，同 useLibrary.emit()：外部清空不得被当成用户取消 pin。
 function emit() {
   cache = load()
+  setChangeOrigin('external')
   notify()
 }
 
@@ -64,6 +66,7 @@ function subscribe(fn) {
 function write(next) {
   cache = next
   safeSet(KEY, JSON.stringify(next))
+  setChangeOrigin('local')
   notify()
 }
 

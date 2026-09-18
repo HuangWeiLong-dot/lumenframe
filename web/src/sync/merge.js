@@ -23,6 +23,50 @@ export function buildLocalState(projected, meta) {
   return out
 }
 
+// 把「投影变了」翻译成同步元数据（时间戳 / 墓碑）。
+//
+//   prev / next: { [listKey]: payload }  前后两次投影
+//   external:    这次变化是否来自 storage 事件触发的存储重读
+//                （清站点数据、别的标签页清空、浏览器把存储抹掉），而不是本页的用户操作
+//
+// external 时**绝不记墓碑**。这是本文件里 buildLocalState 那条不变式的上游：既然
+// 「meta 说活着、投影里却没有」要当作不存在（清缓存 = 从云端完整恢复），那么
+// 「外部改写把投影抹空了」就更不能反过来记成「用户删了每一条」——记了就会把整库
+// 删除当作权威推上云端：用户清一次站点数据，那台设备同步过的所有数据就全没了。
+//
+// vanished 供调用方判断「本地缓存被外部清空」，据此拉一轮把云端数据恢复回来。
+export function recordChanges(prev, next, now, external) {
+  const patch = {}
+  let vanished = false
+  const keys = new Set([...Object.keys(prev || {}), ...Object.keys(next || {})])
+  for (const key of keys) {
+    const a = prev?.[key]
+    const b = next?.[key]
+    if (b === undefined) {
+      if (a === undefined) continue
+      vanished = true
+      if (external) continue                        // 外部改写：是缓存被清，不是删除
+      patch[key] = { ts: now, deleted: true }
+    } else if (a === undefined) {
+      patch[key] = { ts: now }                      // 新增（或删除后重新加回，顺带清掉墓碑）
+    } else if (canon(a) !== canon(b)) {
+      patch[key] = { ts: now }
+    }
+  }
+  return { patch, vanished }
+}
+
+// 落盘前的 meta：与磁盘上的副本逐键合并，谁新保留谁。
+// 别的标签页可能刚记了更新的时间戳或墓碑，整对象覆盖会把它抹掉——典型后果是
+// A 标签页删掉的条目，被 B 标签页的陈旧 meta 覆盖后复活。
+//
+// scope 不同才整体覆盖：那个 scope 属于另一个账号，它的墓碑本就不该带过来。
+// scope === null（访客态）不走这条：访客期间记下的墓碑必须留到转正之后。
+export function persistableMeta(disk, local) {
+  if (disk && disk.scope != null && disk.scope !== local.scope) return local
+  return { scope: local.scope, meta: applyMetaWriteBack(disk?.meta || {}, local.meta) }
+}
+
 // 并集合并，逐键 last-write-wins。两端各自独立执行必须得到同一个结果。
 export function mergeStates(local, remote) {
   const out = {}
