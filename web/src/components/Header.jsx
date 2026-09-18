@@ -5,12 +5,18 @@ import { useAuth, openModal } from '../auth/store'
 import { useSyncStatus } from '../sync/engine'
 import AuthModal from './AuthModal'
 
-// 同步状态圆点：灰=空闲、黑闪=同步中、红=失败
+// 同步状态圆点：灰=空闲、黑闪=同步中、红=失败、琥珀=有一批删除被熔断扣下（待确认）
 function SyncDot({ state }) {
   return (
     <span
       className={`inline-block h-[6px] w-[6px] shrink-0 ${
-        state === 'syncing' ? 'animate-pulse bg-black' : state === 'error' ? 'bg-red-500' : 'bg-zinc-300'
+        state === 'syncing'
+          ? 'animate-pulse bg-black'
+          : state === 'error'
+            ? 'bg-red-500'
+            : state === 'guard'
+              ? 'bg-amber-500'
+              : 'bg-zinc-300'
       }`}
     />
   )

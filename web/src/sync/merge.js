@@ -120,3 +120,36 @@ export function computeDirty(merged, remote) {
   }
   return dirty
 }
+
+// ---- 批量删除熔断 ----
+//
+// 删除是「本地记墓碑 + 推上云端」，所以一份被污染的 sync:meta 能一次性清掉整个云端片库：
+// 2026-09-18 那次事故就是旧代码把「清站点数据」录成了整库删除，50 条墓碑推上去，
+// 所有设备的数据一起没。修复只堵住了那一处来源，堵不住「meta 里已经有一批墓碑」这件事。
+//
+// 所以推删除之前先量一下伤害：这一轮会删掉多少条**云端还活着**的条目。
+// 超过阈值就不推这些删除（新增/修改照推），由用户点「立即同步」再确认一次。
+export const BULK_DELETE_MIN = 10      // 少于这个条数一律照删，个人清理几条是日常操作
+export const BULK_DELETE_RATIO = 0.5   // 且要超过云端存活条目的一半
+
+export function deleteImpact(merged, dirty, remote) {
+  let kills = 0
+  let live = 0
+  for (const r of Object.values(remote)) if (!r.deleted) live++
+  for (const key of dirty) {
+    // 只算「云端活着、这一轮要被删掉」的；给云端本来就没有的键记墓碑不伤人
+    if (merged[key]?.deleted && remote[key] && !remote[key].deleted) kills++
+  }
+  return { kills, live }
+}
+
+export function isBulkDelete({ kills, live }) {
+  return kills >= BULK_DELETE_MIN && kills > live * BULK_DELETE_RATIO
+}
+
+// 熔断时这一轮该跳过哪些键：只扣下要删云端的那些。
+export function heldBackKeys(merged, dirty, remote) {
+  return new Set(
+    dirty.filter((key) => merged[key]?.deleted && remote[key] && !remote[key].deleted)
+  )
+}

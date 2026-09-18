@@ -9,7 +9,7 @@ import { safeGetJSON, safeSet, safeSetJSON, getChangeOrigin } from '../storage'
 import { project, toLocal, toRows, fromRows, canon } from './projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
-  recordChanges, persistableMeta,
+  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys,
 } from './merge.js'
 
 const META_KEY = 'lumenframe:sync:meta'
@@ -32,9 +32,18 @@ let running = false
 let pendingSync = false
 let lastPullAt = 0
 
+// 上一轮是不是扣下了一批删除（= 状态停在 guard）。单独记一个布尔而不是读 statusState：
+// 用户点「确认」时可能正好有一轮在跑（状态是 syncing），读状态会把这次确认吞掉。
+let pendingGuard = false
+
+// 「立即同步」在 guard 状态下点第二次 = 确认推送被扣下的那批删除。
+// 只对一轮生效，且在一轮真的开始时就消费掉：中途失败也当作已经确认过，
+// 下一轮重新熔断让用户再点一次，免得「点了确认但失败」之后某轮后台同步悄悄删掉。
+let forceDeletes = false
+
 // ---- 状态 store（供 UI 订阅）----
 
-let statusState = { state: 'off', lastSyncedAt: null, error: null }
+let statusState = { state: 'off', lastSyncedAt: null, error: null, blockedDeletes: 0 }
 const statusListeners = new Set()
 
 function setStatus(patch) {
@@ -196,6 +205,8 @@ async function syncNow() {
 
   running = true
   setStatus({ state: 'syncing', error: null })
+  const forced = forceDeletes
+  forceDeletes = false
   try {
     const supabase = await getSupabase()
 
@@ -243,12 +254,30 @@ async function syncNow() {
     }
 
     const dirty = computeDirty(merged, remote)
-    if (dirty.length) await push(supabase, user.id, merged, dirty)
+
+    // 批量删除熔断：要删掉的「云端还活着」的条目超过阈值就先扣下（见 merge.deleteImpact）。
+    // 新增/修改照推——被扣的只是删除，用户点一次「立即同步」就放行。
+    let blocked = 0
+    let toPush = dirty
+    if (!forced && isBulkDelete(deleteImpact(merged, dirty, remote))) {
+      const held = heldBackKeys(merged, dirty, remote)
+      toPush = dirty.filter((key) => !held.has(key))
+      blocked = held.size
+    }
+    if (toPush.length) await push(supabase, user.id, merged, toPush)
 
     // 同样地，推送期间 recorder 可能又记了新的时间戳/墓碑，整体赋值会覆盖掉
     meta.meta = applyMetaWriteBack(meta.meta, merged)
     persistMeta()
-    setStatus({ state: 'idle', lastSyncedAt: Date.now(), error: null })
+    // 扣下删除时状态停在 guard，而且本地的墓碑还在 meta 里——下一轮会再次触发熔断。
+    // 这是刻意的：用户没确认之前它就该一直亮着。
+    pendingGuard = blocked > 0
+    setStatus({
+      state: blocked ? 'guard' : 'idle',
+      lastSyncedAt: Date.now(),
+      error: null,
+      blockedDeletes: blocked,
+    })
   } catch (e) {
     setStatus({ state: 'error', error: e?.message || 'sync failed' })
   } finally {
@@ -297,7 +326,7 @@ function onAuthChange() {
   const { user, ready } = getAuthState()
   if (!ready) return
   if (!user) {
-    setStatus({ state: 'off', error: null })
+    setStatus({ state: 'off', error: null, blockedDeletes: 0 })
     return
   }
   syncNow()
@@ -329,7 +358,9 @@ export function initSync() {
   onAuthChange()
 }
 
-// 供 UI 的「立即同步」按钮使用
+// 供 UI 的「立即同步」按钮使用。
+// guard 状态下点它是**二次确认**：放行上一轮被扣下的那批删除（只对一轮生效）。
 export function requestSync() {
+  if (pendingGuard) forceDeletes = true
   return syncNow()
 }

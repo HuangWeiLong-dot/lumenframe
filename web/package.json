@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sim": "vite build --config vite.sim.config.js && node scripts/sim/dist/run.mjs",
+    "sim:wipe": "vite build --config vite.sim.config.js && node scripts/sim/dist/run.mjs wipe"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "^5.3.0",

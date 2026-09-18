@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { project, toLocal, fromRows, toRows, canon, listKey } from '../src/sync/projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
-  recordChanges, persistableMeta,
+  recordChanges, persistableMeta, deleteImpact, isBulkDelete, heldBackKeys,
 } from '../src/sync/merge.js'
 
 let passed = 0
@@ -365,6 +365,57 @@ check('toLocal 保留被排除出投影的 ratings', () => {
   const local = toLocal(state, current)
   assert.equal(local.library.watched[0].ratings.imdb, 8)   // ratings 未被抹掉
   assert.equal(local.library.watched[0].title, 'A')        // 远端值覆盖
+})
+
+// ---- 批量删除熔断 ----
+
+const bulk = (n, prefix) =>
+  Object.fromEntries(Array.from({ length: n }, (_, i) => [`${prefix}:movie:${i}`, { deleted: true }]))
+
+check('删除量不足阈值：照删（个人清理几条是日常操作）', () => {
+  const remote = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`watched:movie:${i}`, { ts: 1, payload: {} }]))
+  const dirty = Object.keys(bulk(9, 'watched'))
+  const impact = deleteImpact(Object.fromEntries(dirty.map((k) => [k, { deleted: true }])), dirty, remote)
+  assert.equal(impact.kills, 9)
+  assert.equal(impact.live, 50)
+  assert.equal(isBulkDelete(impact), false)
+})
+
+check('删除量过半：熔断（这正是整库被删的形状）', () => {
+  assert.equal(isBulkDelete({ kills: 10, live: 19 }), true)     // 10 > 19/2
+  assert.equal(isBulkDelete({ kills: 10, live: 20 }), false)    // 恰好一半：不算过半
+  assert.equal(isBulkDelete({ kills: 50, live: 50 }), true)
+})
+
+check('大库里删掉一小撮：不熔断（1000 条里删 10 条不该拦）', () => {
+  assert.equal(isBulkDelete({ kills: 10, live: 1000 }), false)
+})
+
+check('deleteImpact 只算「云端活着、这一轮要删」的键', () => {
+  const keys = ['watched:movie:1', 'watched:movie:2', 'watched:movie:3']
+  const merged = Object.fromEntries(keys.map((k) => [k, { ts: 10, deleted: true }]))
+  const remote = {
+    'watched:movie:1': { ts: 5, payload: { title: 'A' } },       // 活着 -> 算一次删除
+    'watched:movie:2': { ts: 5, deleted: true },                 // 已经是墓碑 -> 不算（没有东西可删）
+    // 3 云端根本没有 -> 不算
+  }
+  const impact = deleteImpact(merged, keys, remote)
+  assert.equal(impact.kills, 1)
+  assert.equal(impact.live, 1)
+})
+
+check('熔断只扣下删除，新增与修改照推', () => {
+  const merged = {
+    'watched:movie:1': { ts: 10, deleted: true },
+    'watched:movie:2': { ts: 10, payload: { title: 'B' } },
+    'watched:movie:3': { ts: 10, payload: { title: 'C' } },
+  }
+  const remote = {
+    'watched:movie:1': { ts: 5, payload: { title: 'A' } },      // 要被删掉的那条
+    'watched:movie:2': { ts: 5, payload: { title: 'B' } },
+  }
+  const held = heldBackKeys(merged, ['watched:movie:1', 'watched:movie:2', 'watched:movie:3'], remote)
+  assert.deepEqual([...held], ['watched:movie:1'])
 })
 
 for (const [name, fn] of cases) {

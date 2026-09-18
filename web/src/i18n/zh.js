@@ -436,6 +436,8 @@ export default {
   'sync.error': '同步失败',
   'sync.retry': '重试',
   'sync.now': '立即同步',
+  'sync.guardBlocked': '有 {n} 条删除待确认',
+  'sync.confirmDeletes': '确认删除并同步',
   'sync.localOnly': '仅保存在本机',
   'sync.signInToSync': '登录后可在设备间同步',
   'sync.justNow': '刚刚',
