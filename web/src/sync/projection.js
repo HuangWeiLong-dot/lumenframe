@@ -63,14 +63,22 @@ export function project({ library, notes, pinned }) {
     out[listKey(LIKES, type, like.id)] = likePayload(like)
   }
 
-  for (const [key, text] of Object.entries(notes || {})) {
+  for (const [key, note] of Object.entries(notes || {})) {
+    // 兼容两代形态：旧版是裸字符串 '好看'，新版是 { text, addedAt }（见 useLibrary.normalizeNote）
+    const text = typeof note === 'string' ? note : note?.text
     if (!key || typeof text !== 'string') continue
     const sep = key.indexOf(':')
     if (sep < 0) continue
     const kind = key.slice(0, sep) || 'movie'
     const id = key.slice(sep + 1)
     if (!id) continue
-    out[listKey(NOTES, kind, id)] = { text }
+    // addedAt 必须进投影：engine 的 seedMeta 靠 payload.addedAt 给「meta 里没记录过」的键
+    // 播种时间戳，缺了它就永远播成 0 = 年龄不详，首次登录必输给云端同一条。
+    // 旧版行没有这个字段，所以 0/缺失时**不写这个键**，保持载荷与旧版逐字节一致，
+    // 免得给整份短评列表做一次无意义的重推。
+    const payload = { text }
+    if (note?.addedAt) payload.addedAt = note.addedAt
+    out[listKey(NOTES, kind, id)] = payload
   }
 
   for (const pin of Array.isArray(pinned) ? pinned : []) {
@@ -140,7 +148,13 @@ export function toLocal(state, current) {
     } else if (list === LIKES) {
       likes.push({ type: kind, id: reviveId(rawId), ...item.payload })
     } else if (list === NOTES) {
-      notes[`${kind}:${rawId}`] = item.payload?.text ?? ''
+      const noteKey = `${kind}:${rawId}`
+      // addedAt 要从合并结果带回来：否则每轮都会判定「投影变了」，短评 store 被反复重写。
+      // 云端载荷没有（旧版客户端推上去的行）就沿用本机已有的值，都没有则 0 = 年龄不详。
+      const prev = current?.notes?.[noteKey]
+      const addedAt =
+        item.payload?.addedAt || (prev && typeof prev === 'object' ? prev.addedAt : 0) || 0
+      notes[noteKey] = { text: item.payload?.text ?? '', addedAt }
     } else if (list === PINNED) {
       pinned.push({ ...item.payload, kind, id: reviveId(rawId) })
     }

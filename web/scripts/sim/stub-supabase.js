@@ -9,6 +9,9 @@ const clone = (v) => JSON.parse(JSON.stringify(v))
 
 const dbg = (...a) => { if (process.env.SIM_DEBUG) console.log('   [db]', ...a) }
 
+let upsertCalls = 0 // 推送尝试次数：重试场景靠它证明「退避期间没有密集重试」
+let failNextUpserts = 0 // > 0 时接下来的若干次 upsert 直接返回错误（模拟网络/RLS 失败）
+
 class Query {
   constructor(rows) { this.rows = rows }
   select() { return this }
@@ -29,6 +32,12 @@ class Query {
     return Promise.resolve({ data: this.rows.map(clone), error: null }).then(resolve, reject)
   }
   upsert(rows, onConflict) {
+    upsertCalls++
+    if (failNextUpserts > 0) {
+      failNextUpserts--
+      dbg(`upsert 第 ${upsertCalls} 次：按注入设置失败`)
+      return Promise.resolve({ error: { message: 'simulated push failure' } })
+    }
     if (process.env.SIM_DEBUG) console.log(`   [db] upsert ${rows.length} 行: ${rows.map((r) => `${r.list_name}:${r.kind}:${r.item_id}`).join(', ')}`)
     // supabase-js 的签名是 upsert(rows, { onConflict: 'a,b,c' })
     const spec = typeof onConflict === 'object' && onConflict ? onConflict.onConflict : onConflict
@@ -80,4 +89,8 @@ export const sim = {
   live: () => tables.library_items.filter((r) => r.deleted_at == null).map(clone),
   tombstones: () => tables.library_items.filter((r) => r.deleted_at != null).map(clone),
   reset() { tables.library_items = [] },
+  // 重试场景用：让接下来 n 次 upsert 失败；查推送尝试过几次
+  failNextUpserts(n) { failNextUpserts = n },
+  upserts: () => upsertCalls,
+  resetUpserts() { upsertCalls = 0 },
 }

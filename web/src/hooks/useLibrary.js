@@ -37,16 +37,39 @@ let cache = readStore()
 let notesCache = readNotes()
 const listeners = new Set()
 
+// 短评存两代形态：旧版是裸字符串 '好看'，新版是 { text, addedAt }。
+// addedAt 是同步层给「首次同步」播种时间戳的唯一依据（见 sync/engine.js 的 seedMeta）：
+// 没有它就只能播成 0 = 年龄不详，首次登录必输给云端同一条。
+// 旧形态补成 { text, addedAt: 0 }——行为与旧版一致，但文字一个字不丢。
+//
+// ⚠ 必须是 function 声明：上面 let notesCache = readNotes() 依赖函数提升
+function normalizeNote(v) {
+  if (typeof v === 'string') return { text: v, addedAt: 0 }
+  if (!v || typeof v !== 'object' || typeof v.text !== 'string') return null
+  return { text: v.text, addedAt: Number(v.addedAt) || 0 }
+}
+
+function normalizeNotes(obj) {
+  const out = {}
+  for (const [key, v] of Object.entries(obj && typeof obj === 'object' ? obj : {})) {
+    const note = normalizeNote(v)
+    if (note) out[key] = note
+  }
+  return out
+}
+
 function readNotes() {
-  const obj = safeGetJSON(NOTES_KEY, null)
-  return obj && typeof obj === 'object' ? obj : {}
+  return normalizeNotes(safeGetJSON(NOTES_KEY, null))
 }
 
 // localStorage 可能被隐私模式/浏览器策略禁用或写满：写失败只影响持久化，
 // 不应让「加入观影库 / 评分 / 短评」等交互抛错崩掉页面（safeSet 见 ../storage）
+//
+// 归一化放在这里而不是只在读取时：writeNotes 也是 applyRemoteNotes 的落地口，
+// 云端回来的形态必须与本地一致，否则每轮同步都会判定「投影变了」而反复重写。
 function writeNotes(next) {
-  notesCache = next
-  safeSet(NOTES_KEY, JSON.stringify(next))
+  notesCache = normalizeNotes(next)
+  safeSet(NOTES_KEY, JSON.stringify(notesCache))
 }
 
 // 只通知订阅者（保留内存缓存里的改动，即便持久化失败本次会话也生效）
@@ -223,13 +246,14 @@ export function useLibrary() {
 
   // 短评：独立存储，不要求加入 watched；同步到 watched 条目里以便 Library 页和 Card Studio 使用
   const getNote = useCallback(
-    (kind, id) => notesCache[entryKey(kind, id)] || '',
+    (kind, id) => notesCache[entryKey(kind, id)]?.text || '',
     []
   )
   const setNote = useCallback((kind, id, text) => {
     const key = entryKey(kind, id)
     const next = { ...notesCache }
-    if (text) next[key] = text
+    // addedAt = 短评写下的时间：同步层把它当条目时间戳用（改一次就是一次新的修改）
+    if (text) next[key] = { text, addedAt: Date.now() }
     else delete next[key]
     writeNotes(next)
     // 同时同步到 watched 条目（如果存在）

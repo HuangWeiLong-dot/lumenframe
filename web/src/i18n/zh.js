@@ -434,6 +434,7 @@ export default {
   'sync.lastSynced': '上次同步 {time}',
   'sync.never': '尚未同步',
   'sync.error': '同步失败',
+  'sync.retrying': '同步失败，将自动重试（第 {n} 次）',
   'sync.retry': '重试',
   'sync.now': '立即同步',
   'sync.guardBlocked': '有 {n} 条删除待确认',

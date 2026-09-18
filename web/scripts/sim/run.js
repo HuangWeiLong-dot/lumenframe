@@ -1,8 +1,9 @@
 // 真跑一遍 sync/engine.js：把 src 下的同步层、store、auth 直接搬进 node，
 // 用内存表冒充 Supabase，验证「访客收藏 → 登录」这个流程到底做了什么。
 //
-//   npm run sim       --prefix web        访客收藏 → 登录
-//   npm run sim:wipe  --prefix web        四种危险状态各跑一遍
+//   npm run sim        --prefix web       访客收藏 → 登录
+//   npm run sim:wipe   --prefix web       四种危险状态各跑一遍
+//   npm run sim:retry  --prefix web       首次上传失败 → 自动退避重试（见 retry-case.js）
 //
 // 与 check-sync.mjs 的分工：那个测纯函数的合并分支，这个测**接线**——订阅顺序、
 // 快照时机、recorder 有没有把访客的改动记成时间戳，纯函数测试都覆盖不到。
@@ -19,6 +20,8 @@ import { initSync, getSyncStatus } from '../../src/sync/engine.js'
 import { initAuth, actions, getAuthState } from '../../src/auth/store.js'
 import { getLibraryState, applyRemoteLibrary, applyRemoteNotes } from '../../src/hooks/useLibrary.js'
 import { CASES, runWipeCase } from './wipe-cases.js'
+import { runRetryCase } from './retry-case.js'
+import { NOW, DAY } from './fixtures.js'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const mode = process.argv[2] || 'guest'
@@ -35,6 +38,12 @@ if (mode === 'wipe') {
 
 if (mode.startsWith('wipe:')) {
   await runWipeCase(mode.slice(5).toUpperCase())
+  process.exit(process.exitCode ?? 0)
+}
+
+// 必须在下面的访客段之前分发：那一段是模块顶层代码，不 return 就会被跑第二遍
+if (mode === 'retry') {
+  await runRetryCase()
   process.exit(process.exitCode ?? 0)
 }
 
@@ -101,7 +110,14 @@ applyRemoteLibrary({
     ...guestLib.watched,
   ],
 })
-applyRemoteNotes({ 'movie:100': '本地写的短评', 'movie:300': '访客短评' })
+// 短评只写 movie:300（本次会话新写的，新版形态）。
+// movie:100 是 preload 里就存在的旧版裸字符串——那条必须**原样留着**，
+// 它是「升级前就在本机、没有任何时间信息」的情形，正是要被抢救的那批：
+// 一旦在这里把它重写一遍，recorder 会给它记一个真实时间戳，抢救分支就测不到了。
+applyRemoteNotes({
+  ...getLibraryState().notes,
+  'movie:300': { text: '访客短评', addedAt: Date.now() },
+})
 
 assert(getLibraryState().library.watched.length === 2, `访客本机应有 2 部，实际 ${getLibraryState().library.watched.length}`)
 
@@ -163,8 +179,24 @@ check('登录后本地能看到账号原有的条目（并集）', () => {
 })
 
 check('短评也合并了两端', () => {
-  assert(local.notes['movie:100'] === 'cloud note', `movie:100 短评：${local.notes['movie:100']}`)
-  assert(local.notes['movie:300'] === '访客短评', `movie:300 短评：${local.notes['movie:300']}`)
+  // notes 是整对象替换，local 是同步开始前的快照，必须重新取
+  const notes = getLibraryState().notes
+  assert(notes['movie:100']?.text === '本地写的短评', `movie:100 短评：${JSON.stringify(notes['movie:100'])}`)
+  assert(notes['movie:300']?.text === '访客短评', `movie:300 短评：${JSON.stringify(notes['movie:300'])}`)
+})
+
+check('升级前的旧短评被抢救（没有被云端旧记录吃掉）', () => {
+  // 这条是 rescueUntimedNotes 的效果：云端的 notes:movie:100 写于 2026-03-01，
+  // 本机那条是旧版裸字符串（没有任何时间信息）→ 播种成 now → 本机胜出。
+  const notes = getLibraryState().notes
+  assert(notes['movie:100']?.text === '本地写的短评', `旧短评被云端盖掉了：${JSON.stringify(notes['movie:100'])}`)
+})
+
+check('被抢救的旧短评已推上云端，时间戳是抢救时的 now 而非 0', () => {
+  const r = live.find((x) => x.list_name === 'notes' && x.item_id === '100')
+  assert(r, '云端没有 notes:movie:100')
+  assert(r.payload.text === '本地写的短评', `云端短评没被救回：${r.payload.text}`)
+  assert(Date.parse(r.updated_at) > NOW - DAY, `updated_at 应是抢救的 now，实际 ${r.updated_at}`)
 })
 
 check('同步状态正常结束', () => {
