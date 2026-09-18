@@ -1,10 +1,25 @@
 @import "tailwindcss";
 
+/* 全局字体栈。Inter 只含拉丁字形，中文逐字回退到第二位的自托管 Noto Sans SC。
+   为什么必须自带中文字体：系统中文（Windows 微软雅黑）只有 400/700 两档字重，
+   会把 font-medium(500)/font-semibold(600) 吸附成 700 粗体，而英文的 Inter 能渲染
+   真正的 500/600 —— 于是同一行中西文粗细不一致。Noto Sans SC 是 100-900 可变字重，
+   能让中文拿到与英文相同的字重。末尾的系统字体仅作 webfont 未就绪时的兜底。 */
+@theme {
+  --font-sans: 'Inter', 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
 /* 防止任何全宽元素（如 100vw）撑出横向滚动条。
    用 clip 而非 hidden：hidden 会把 body 变成滚动容器，破坏后代 position: sticky */
 html,
 body {
   overflow-x: clip;
+  /* 字体栈唯一来源，组件里不要再写内联 font-family。内联样式优先级更高会盖掉这里的栈；
+     曾散落在 13 处的 'Inter', Arial, sans-serif 就是这个坑：该栈没有中文字形，中文落到
+     系统字体后 600 被吸附成 700，而英文的 Inter 是真 600 —— 同一行中西文粗细不一致。
+     （系统字体并非没用，只是排在自托管字体之后兜底，见上面 @theme 里的顺序） */
+  font-family: var(--font-sans);
 }
 
 /* 海报背景墙（Canvas 绘制） */
@@ -37,4 +52,26 @@ body {
   100% {
     transform: translateX(100%);
   }
+}
+
+/* Pin 收藏栏：新收藏的卡片从右侧滑入并固定到左侧收藏栏 */
+@keyframes pin-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(44px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 横向滚动容器隐藏滚动条（如 Library 的 Tabs）：仍可滑动/滚动，只是不显示滚动条 */
+.no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 旧 Edge/IE */
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

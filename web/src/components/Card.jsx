@@ -1,13 +1,15 @@
 // 卡片渲染：Canvas 直接绘制，预览与导出完全一致
-import { forwardRef, useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import {
   fillRoundRect, drawText, drawImageCover,
   linearGradient, drawRatings, isDark, mcColor, personalColor, rtColor, popcornColor, wrapText,
 } from './canvas-utils'
 import { posterFor } from '../api'
 
+// 中文字体放在拉丁字体之后：拉丁字形仍由 Helvetica/Arial 渲染（卡片既有排版不变），
+// 中文回退到自托管 Noto Sans SC，拿到与网页端一致的真实字重（系统雅黑只有 400/700）
 const FONTS = {
-  sans: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+  sans: '"Helvetica Neue", Helvetica, Arial, "Noto Sans SC Variable", sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
   mono: '"Courier New", Courier, monospace',
 }
@@ -75,7 +77,8 @@ function buildFactRows(movie, specs, cfg) {
 // 根据 cfg.textAlign 计算文本面板与海报的相对位置（横版用，竖版直接取默认值）
 // textAlign: 'left' | 'center' | 'right'
 //   - landscape 'right': 文字在左，海报在右
-//   - landscape 'left'/'center': 默认，文字在右，海报在左
+//   - landscape 'left': 文字在右，海报在左
+//   - landscape 'center': 文字块相对画布水平居中（tw=W*0.72，tx=(W-tw)/2），海报退为侧边层
 //   - portrait: tx=P, tw=W-P*2；海报位置由各 drawer 自己决定
 function resolveLayout(W, H, landscape, textAlign, opts = {}) {
   const { posterFrac = 0.38, gap = 44, PAD = 56 } = opts
@@ -85,6 +88,12 @@ function resolveLayout(W, H, landscape, textAlign, opts = {}) {
     const tw = W - pw - gap - PAD * 2
     return { tx: PAD, tw, posterX: W - pw - PAD, posterW: pw }
   }
+  if (textAlign === 'center') {
+    // 文字块相对画布水平居中
+    const tw = W * 0.72
+    return { tx: (W - tw) / 2, tw, posterX: PAD, posterW: pw }
+  }
+  // left
   const tx = PAD + pw + gap
   const tw = W - tx - PAD
   return { tx, tw, posterX: PAD, posterW: pw }
@@ -164,42 +173,17 @@ function drawInfoList(ctx, x, y, maxWidth, rows, opts = {}) {
 }
 
 // 辅助：仅计算换行结果（不绘制），返回 lines 和 lineHeight（超 maxLines 截断加省略号）
+// 与 drawText 共用 canvas-utils 的同一套断行逻辑：测量与绘制必须同行数，
+// 否则中英文混排时「量出来的高度」和「实际画出来的行数」会对不上（块跑出海报）
 function wrapTextLines(ctx, text, maxWidth, fontSize, lineHeight, maxLines, fontFamily = 'sans-serif') {
   ctx.font = `600 ${fontSize}px ${fontFamily}`
-  const words = String(text).split(/\s+/)
-  const lines = []
-  let line = ''
-  for (const word of words) {
-    const test = line ? line + ' ' + word : word
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line); line = word
-      if (maxLines && lines.length >= maxLines) break
-    } else line = test
-  }
-  if (!maxLines || lines.length < maxLines) if (line) lines.push(line)
-  if (maxLines && lines.length === maxLines) {
-    let last = lines[maxLines - 1]
-    while (last && ctx.measureText(last + '…').width > maxWidth) last = last.slice(0, -1)
-    lines[maxLines - 1] = last + '…'
-  }
-  return { lines, lineHeight: fontSize * lineHeight }
+  return wrapText(ctx, text, maxWidth, fontSize, lineHeight, maxLines)
 }
 
 // 辅助：计算文字高度（不绘制），返回 { height, lineHeight }
 function wrapTextHeight(ctx, text, maxWidth, fontSize, lineHeight, maxLines, fontWeight = 'normal', fontFamily = 'sans-serif') {
   ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`
-  const words = String(text).split(/\s+/)
-  const lines = []
-  let line = ''
-  for (const word of words) {
-    const test = line ? line + ' ' + word : word
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line); line = word
-      if (maxLines && lines.length >= maxLines) break
-    } else line = test
-  }
-  if (!maxLines || lines.length < maxLines) if (line) lines.push(line)
-  return { height: lines.length * fontSize * lineHeight, lineHeight: fontSize * lineHeight }
+  return wrapText(ctx, text, maxWidth, fontSize, lineHeight, maxLines, false)
 }
 
 // 自适应标题：自动缩小字号直到 maxLines 内放得下，不加省略号
@@ -233,6 +217,11 @@ function drawMinimal(ctx, p) {
   if (landscape) {
     const { tx, tw, posterX, posterW } = resolveLayout(W, H, landscape, align, { posterFrac: 0.38, gap: 44, PAD: P })
     drawImageCover(ctx, posterImg, posterX, P, posterW, H - P * 2, false)
+    // center 时文字块居中会覆盖海报右侧，压一层暗罩保证文字可读
+    if (align === 'center') {
+      ctx.fillStyle = 'rgba(0,0,0,0.45)'
+      ctx.fillRect(posterX, P, posterW, H - P * 2)
+    }
     let cy = P
     const ax = alignX(align, tx, tw)
     const { height: th } = drawTitle(ctx, movie.title, ax, cy, tw, { fontSize: 74 * fs, color: ink, fontFamily, fontWeight: 900, lineHeight: 1.02, maxLines: 2, maxY: contentBottom, letterSpacing: -0.02 * 74 * fs, align })
@@ -335,9 +324,10 @@ function drawMagazine(ctx, p) {
   ctx.fillRect(0, 0, W, H)
 
   // landscape 时文字面板位置/宽度取决于 align
-  const tw = landscape ? W * 0.54 : W - P * 2
+  // center: 文字块相对画布水平居中（tw=W*0.72）
+  const tw = landscape ? (align === 'center' ? W * 0.72 : W * 0.54) : W - P * 2
   const tx = landscape
-    ? (align === 'right' ? W - P - tw : P)
+    ? (align === 'right' ? W - P - tw : align === 'center' ? (W - tw) / 2 : P)
     : P
   let cy = landscape ? H / 2 - 100 : H - P
   if (!landscape) {
@@ -422,6 +412,11 @@ function drawNoir(ctx, p) {
     // align=right → 文字在左 → 海报靠右；align=left → 文字在右 → 海报靠左
     const posterX = align === 'right' ? W - posterW : 0
     drawImageCover(ctx, posterImg, posterX, 0, posterW, H, true)
+    // center 时文字块居中会覆盖海报，压一层暗罩保证文字可读
+    if (align === 'center') {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'
+      ctx.fillRect(posterX, 0, posterW, H)
+    }
     let cy = H / 2 - 130
     const ax = alignX(align, tx, tw)
     cy += drawText(ctx, eyebrow, ax, cy, tw, { fontSize: 16 * fs, color: ink, fontFamily, letterSpacing: 0.4 * 16 * fs, transform: 'uppercase', opacity: 0.5, align }).height + 10
@@ -812,6 +807,27 @@ const Card = forwardRef(function Card({ movie, config, width, height, specs, rat
   const canvasRef = useRef(null)
   const posterImgRef = useRef(null)
 
+  // Canvas 是即时绘制到位图的：若在中文分包下载完成前就画，会先用系统中文字体画一遍
+  // （字重被吸附成粗体，与网页预览不一致），且之后没有任何机制触发重绘。
+  // 这里等标题/简介/短评用到的字形就绪后翻一次标志，驱动下面的 render 重跑。
+  const [fontsReady, setFontsReady] = useState(false)
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.fonts) {
+      setFontsReady(true)
+      return
+    }
+    let alive = true
+    const sample = [movie?.title, movie?.overview, note].filter(Boolean).join('')
+    // 可变字体同一份文件覆盖全部字重，按实际用到的字重触发对应 unicode-range 分包
+    const faces = ['400 16px', '600 16px', '900 16px'].map(
+      (w) => document.fonts.load(`${w} "Noto Sans SC Variable"`, sample).catch(() => null)
+    )
+    Promise.all([document.fonts.ready, ...faces]).then(() => {
+      if (alive) setFontsReady(true)
+    })
+    return () => { alive = false }
+  }, [movie?.title, movie?.overview, note])
+
   // 加载卡片主图：优先使用从 Posters/Stills 挑选的自定义图，否则用官方主海报
   // （电影走 TMDB，剧集走 TVmaze，均经后端图片代理）
   useEffect(() => {
@@ -871,7 +887,7 @@ const Card = forwardRef(function Card({ movie, config, width, height, specs, rat
     ctx.restore()
   }
 
-  useEffect(() => { render() }, [config, width, height, specs, ratings, personal, movie])
+  useEffect(() => { render() }, [config, width, height, specs, ratings, personal, movie, fontsReady])
 
   // 把内部 canvas 暴露给父组件（用于导出）
   useEffect(() => {

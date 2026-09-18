@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { apiUrl } from '../api'
+import { useI18n } from '../i18n'
 
 const LANGS = [
   { code: 'eng', label: 'English' },
@@ -43,6 +44,7 @@ function parseEpisode(filename) {
 }
 
 function SubtitleRow({ sub }) {
+  const { t } = useI18n()
   return (
     <div className="flex items-start gap-3 border border-zinc-200 px-3 py-2.5 transition hover:border-zinc-400 hover:bg-zinc-50">
       <div className="min-w-0 flex-1">
@@ -66,8 +68,8 @@ function SubtitleRow({ sub }) {
         <a
           href={apiUrl(`/api/subtitle/download?url=${encodeURIComponent(sub.downloadUrl)}`)}
           download
-          title="Download subtitle"
-          aria-label="Download subtitle"
+          title={t('subtitles.downloadSub')}
+          aria-label={t('subtitles.downloadSub')}
           className="flex h-8 w-8 items-center justify-center border border-zinc-300 text-zinc-700 transition hover:border-black hover:bg-black hover:text-white"
         >
           <DownloadIcon className="h-4 w-4" />
@@ -78,6 +80,7 @@ function SubtitleRow({ sub }) {
 }
 
 function EpisodeGroup({ epNum, subs }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(true)
   return (
     <div className="border border-zinc-200">
@@ -85,9 +88,9 @@ function EpisodeGroup({ epNum, subs }) {
         onClick={() => setOpen(!open)}
         className="flex w-full items-center justify-between bg-zinc-50 px-3 py-2 text-left transition hover:bg-zinc-100"
       >
-        <span className="text-sm font-semibold text-zinc-800">Episode {epNum}</span>
+        <span className="text-sm font-semibold text-zinc-800">{t('subtitles.episode', { n: epNum })}</span>
         <span className="flex items-center gap-2 text-xs text-zinc-500">
-          {subs.length} subtitle{subs.length > 1 ? 's' : ''}
+          {t('subtitles.subtitleCount', { n: subs.length, s: subs.length > 1 ? 's' : '' })}
           <svg className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polyline points="6 9 12 15 18 9" />
           </svg>
@@ -105,6 +108,7 @@ function EpisodeGroup({ epNum, subs }) {
 }
 
 export default function Subtitles({ movie, embed }) {
+  const { t } = useI18n()
   const [lang, setLang] = useState('eng')
   const [season, setSeason] = useState('')
   const [results, setResults] = useState([])
@@ -122,7 +126,7 @@ export default function Subtitles({ movie, embed }) {
     setLoading(true)
     setError('')
     setFetched(false)
-    const qs = new URLSearchParams({ imdb_id: imdbId, lang, query: movie.title })
+    const qs = new URLSearchParams({ imdb_id: imdbId, lang, query: movie.title_en || movie.title })
     if (season) qs.set('season', season)
     // 不再发送 episode 参数，获取整季所有字幕
     fetch(apiUrl(`/api/subtitles?${qs}`))
@@ -134,7 +138,7 @@ export default function Subtitles({ movie, embed }) {
       })
       .catch(() => {
         if (cancelled) return
-        setError('Failed to load subtitles')
+        setError(t('subtitles.error'))
         setFetched(true)
       })
       .finally(() => {
@@ -170,7 +174,7 @@ export default function Subtitles({ movie, embed }) {
       {/* 控制行 */}
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Lang</label>
+          <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">{t('subtitles.lang')}</label>
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
@@ -184,13 +188,13 @@ export default function Subtitles({ movie, embed }) {
 
         {isTv && seasons.length > 0 && (
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">Season</label>
+            <label className="text-xs font-medium uppercase tracking-[0.15em] text-zinc-500">{t('subtitles.season')}</label>
             <select
               value={season}
               onChange={(e) => setSeason(e.target.value)}
               className="border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800 focus:border-black focus:outline-none"
             >
-              <option value="">All</option>
+              <option value="">{t('subtitles.all')}</option>
               {seasons.map((s) => (
                 <option key={s.number} value={s.number}>S{s.number}</option>
               ))}
@@ -201,7 +205,7 @@ export default function Subtitles({ movie, embed }) {
 
       {loading && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-          Searching subtitles…
+          {t('subtitles.loading')}
         </div>
       )}
 
@@ -213,7 +217,7 @@ export default function Subtitles({ movie, embed }) {
 
       {!loading && !error && fetched && results.length === 0 && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
-          No {LANGS.find(l => l.code === lang)?.label || ''} subtitles found.
+          {t('subtitles.emptyLang', { lang: LANGS.find(l => l.code === lang)?.label || '' })}
         </div>
       )}
 
@@ -226,7 +230,7 @@ export default function Subtitles({ movie, embed }) {
             {groupedResults.unknown.length > 0 && (
               <div className="border border-zinc-200">
                 <div className="bg-zinc-50 px-3 py-2 text-sm font-semibold text-zinc-800">
-                  Other <span className="text-xs font-normal text-zinc-500">({groupedResults.unknown.length})</span>
+                  {t('subtitles.other')} <span className="text-xs font-normal text-zinc-500">({groupedResults.unknown.length})</span>
                 </div>
                 <div className="space-y-1.5 p-1.5">
                   {groupedResults.unknown.map((s, i) => (
@@ -246,7 +250,7 @@ export default function Subtitles({ movie, embed }) {
       )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
-        Subtitle data from OpenSubtitles.org
+        {t('subtitles.attribution')}
       </p>
     </>
   )
@@ -254,7 +258,7 @@ export default function Subtitles({ movie, embed }) {
   if (embed) {
     return (
       <div className="mt-6">
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Subtitles {results.length > 0 && `(${results.length})`}</h3>
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">{t('subtitles.title')} {results.length > 0 && `(${results.length})`}</h3>
         {content}
       </div>
     )

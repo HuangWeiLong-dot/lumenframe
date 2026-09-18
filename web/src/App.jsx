@@ -14,50 +14,31 @@ import ShowEpisodes from './components/ShowEpisodes'
 import TvBackdrops from './components/TvBackdrops'
 import Footer from './components/Footer'
 import Header from './components/Header'
+import PinnedDrawer from './components/PinnedDrawer'
+import LanguagePicker from './components/LanguagePicker'
 import LibraryPage from './components/LibraryPage'
 import PersonPage from './components/PersonPage'
 import GenrePage from './components/GenrePage'
 import { useTrending } from './hooks/useTrending'
-import { useLibrary } from './hooks/useLibrary'
+import { useLibrary, ratingStorageKey, entryKey } from './hooks/useLibrary'
 import { usePinned } from './hooks/usePinned'
-import { apiUrl, posterUrl, posterFor, downloadImage } from './api'
+import { useI18n } from './i18n'
+import { apiUrl, apiUrlWithLang, posterUrl, posterFor, downloadImage } from './api'
 import { genreIdByName } from './genres'
+import { BASE_PATH, resolveSpaRedirect } from './spaUrl'
+import { safeGet, safeSet } from './storage'
+import { DetailHeaderSkeleton, RatingsSkeleton, SpecsSkeleton } from './components/Skeleton'
+import StatusBadge from './components/StatusBadge'
 
 // ---- 极简 History API 路由 ----
 // 电影：{BASE}movie/{tmdbId}-{slug}；剧集：{BASE}tv/{tvmazeId}-{slug}
 // 演职员：{BASE}person/{tmdbPersonId}-{slug}
 // id 保证刷新/分享链接能精确还原；slug 仅用于可读 URL，非 ASCII 片名时可缺省
 
-// 服务器 SPA 重定向修复：部分 nginx/CDN 用 _spa= 参数重定向而非 try_files，
-// 刷新 /tv/541-prison-break → /tv/?_spa=/tv/541-prison-break，
-// 递归解码后 replaceState 回正确路径，避免 URL 无限嵌套
-function resolveSpaRedirect() {
-  const params = new URLSearchParams(window.location.search)
-  let spa = params.get('_spa')
-  if (!spa) return
-  // 递归解包 _spa= 参数（最多 20 层）
-  let path = spa
-  for (let i = 0; i < 20; i++) {
-    const m = path.match(/_spa=([^&]+)/)
-    if (!m) break
-    path = decodeURIComponent(m[1])
-  }
-  // 确保是绝对路径
-  if (!path.startsWith('/')) path = '/' + path
-  window.history.replaceState(null, '', path)
-}
+// 深链回退（_spa 解包）与 BASE_PATH 推导已搬到 ./spaUrl：
+// Supabase 的邮件回调地址也要用 BASE_PATH，从那里 import 可避免循环依赖。
+// 这里必须仍在模块求值期同步调用一次——它是深链能正常还原的前提。
 resolveSpaRedirect()
-
-// 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
-// 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾
-function getBasePath() {
-  const p = window.location.pathname
-  const m = p.match(/\/(movie|tv)\//)
-  if (m) return p.slice(0, m.index + 1)
-  if (p.endsWith('/')) return p
-  return p.slice(0, p.lastIndexOf('/') + 1)
-}
-const BASE_PATH = getBasePath()
 
 function slugify(title) {
   return String(title || '')
@@ -115,7 +96,6 @@ function libraryUrl() {
 function parseLibraryRoute() {
   return /\/library\/?$/.test(window.location.pathname)
 }
-
 
 // 滚动海报背景墙（Canvas 绘制，海报来源 = TMDB 本周热门）
 function PosterBackground() {
@@ -311,6 +291,7 @@ export default function App() {
   // 本地观影库（watched / watch later）
   const lib = useLibrary()
   const pins = usePinned()
+  const { t, apiLang } = useI18n()
   // 当前电影页能否用浏览器后退：应用内点选进来为 true（回到上一页）；
   // 深链直接打开为 false（Back 按钮改走回主页）
   const canBackRef = useRef(false)
@@ -344,8 +325,8 @@ export default function App() {
     const seq = ++searchSeqRef.current
     const timer = setTimeout(async () => {
       const [titleRes, personRes] = await Promise.allSettled([
-        fetch(apiUrl(`/api/search?q=${encodeURIComponent(q)}`)),
-        fetch(apiUrl(`/api/person/search?q=${encodeURIComponent(q)}&limit=5`)),
+        fetch(apiUrlWithLang(`/api/search?q=${encodeURIComponent(q)}`)),
+        fetch(apiUrlWithLang(`/api/person/search?q=${encodeURIComponent(q)}&limit=5`)),
       ])
       if (seq !== searchSeqRef.current) return
       try {
@@ -369,7 +350,8 @@ export default function App() {
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [query])
+    // apiLang：切换语言后搜索结果也要跟着变成对应语言
+  }, [query, apiLang])
 
   // 点击下拉外部或按 Esc 关闭
   useEffect(() => {
@@ -400,7 +382,8 @@ export default function App() {
       return
     }
     try {
-      const url = apiUrl(`/api/specs/${m.imdb_id}?title=${encodeURIComponent(m.title)}&year=${m.year}`)
+      // ShotOnWhat 只认英文片名：中文界面下用 title_en（后端也会做一次 IMDb 反查兜底）
+      const url = apiUrl(`/api/specs/${m.imdb_id}?title=${encodeURIComponent(m.title_en || m.title)}&year=${m.year}`)
       const res = await fetch(url)
       if (token !== reqTokenRef.current) return
       setSpecs(res.ok ? await res.json() : { found: false })
@@ -420,7 +403,8 @@ export default function App() {
       return
     }
     try {
-      const url = apiUrl(`/api/ratings/${m.imdb_id}?title=${encodeURIComponent(m.title)}&year=${m.year}`)
+      // RT 页面抓取只认英文片名（同上）
+      const url = apiUrl(`/api/ratings/${m.imdb_id}?title=${encodeURIComponent(m.title_en || m.title)}&year=${m.year}`)
       const res = await fetch(url)
       if (token !== reqTokenRef.current) return
       const data = res.ok
@@ -443,7 +427,7 @@ export default function App() {
     setPosters([])
     setImagesLoading(true)
     try {
-      const res = await fetch(apiUrl(`/api/movie/${id}/images`))
+      const res = await fetch(apiUrlWithLang(`/api/movie/${id}/images`))
       if (token !== reqTokenRef.current) return
       if (res.ok) {
         const data = await res.json()
@@ -459,16 +443,11 @@ export default function App() {
     }
   }
 
-  // 个人评分仅保存在本机浏览器（电影沿用旧 key，剧集带 tv: 前缀）；同时同步到观影库
-  function ratingStorageKey(kind, id) {
-    return kind === 'tv' ? `lumenframe:myrating:tv:${id}` : `lumenframe:myrating:${id}`
-  }
-
   function changePersonal(v) {
     setPersonal(v)
     if (movie) {
       const kind = movie.kind === 'tv' ? 'tv' : 'movie'
-      localStorage.setItem(ratingStorageKey(kind, movie.id), String(v))
+      safeSet(ratingStorageKey(kind, movie.id), String(v))
       lib.updateMyRating(kind, movie.id, v)
     }
   }
@@ -525,12 +504,25 @@ export default function App() {
     setPosters([])
     try {
       const endpoint = kind === 'tv' ? `/api/tv/${id}` : `/api/movie/${id}`
-      const res = await fetch(apiUrl(endpoint))
+      // 电影走可本地化接口；剧集来自 TVmaze（无中文），保持原样
+      const res = await fetch(kind === 'tv' ? apiUrl(endpoint) : apiUrlWithLang(endpoint))
       if (token !== reqTokenRef.current) return
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Failed to load ${kind === 'tv' ? 'show' : 'movie'}`)
       setMovie(data)
-      setPersonal(Number(localStorage.getItem(ratingStorageKey(kind, data.id))) || 0)
+      // 语言可能已切换：把最新标题同步回收藏/观影库（本地存的是当初打开时的语言）
+      pins.updateEntry(kind, data.id, { title: data.title })
+      lib.updateTitle(kind, data.id, data.title)
+      // 评分优先取观影库条目：云端合并后 watched[].myRating 才是权威值，
+      // 标量 key 仅作为「评了分但没加入片库」时的兜底（否则合并后详情页会显示旧分）
+      const ratedEntry = lib.watched.find(
+        (m) => entryKey(m.kind, m.id) === entryKey(kind, data.id)
+      )
+      setPersonal(
+        ratedEntry
+          ? Number(ratedEntry.myRating) || 0
+          : Number(safeGet(ratingStorageKey(kind, data.id))) || 0
+      )
       // 加载短评
       setNoteState(lib.getNote(kind, data.id))
       // 同步规范 URL（含正式片名 slug）；popstate/深链只在 slug 缺失或不符时 replace
@@ -593,7 +585,7 @@ export default function App() {
       setPersonSearchError('')
       try {
         const qs = new URLSearchParams({ q: name, limit: '1' })
-        const r = await fetch(apiUrl(`/api/person/search?${qs}`))
+        const r = await fetch(apiUrlWithLang(`/api/person/search?${qs}`))
         if (r.ok) {
           const data = await r.json()
           tmdbId = data.results?.[0]?.id
@@ -603,7 +595,7 @@ export default function App() {
         setPersonSearchLoading(false)
       }
       if (!tmdbId) {
-        setPersonSearchError(`Couldn't find "${name}" on TMDB. Try searching from the search box.`)
+        setPersonSearchError(t('detail.couldntFindPerson', { name }))
         // 5 秒后自动清掉错误提示
         setTimeout(() => setPersonSearchError(''), 5000)
         return
@@ -641,12 +633,25 @@ export default function App() {
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  // 详情页点击 genres 字符串时调用：用名字反查 TMDB id，再跳转
-  function openGenreByName(name, kind) {
-    const id = genreIdByName(name, kind)
+  // 详情页点击 genres 字符串时调用：优先用静态英文名映射表反查 TMDB id；
+  // 中文界面下类型名是中文（映射表命中不了），用后端返回的 genre_ids[idx] 兜底
+  function openGenreByName(name, kind, idx) {
+    const id = genreIdByName(name, kind) || movie?.genre_ids?.[idx] || null
     if (!id) return
     openGenre(kind, id, name)
   }
+
+  // 语言切换：当前电影详情页立即用新语言重拉（剧集来自 TVmaze，无中文，跳过）
+  const prevApiLangRef = useRef(apiLang)
+  useEffect(() => {
+    if (prevApiLangRef.current === apiLang) return
+    prevApiLangRef.current = apiLang
+    if (view === 'movie' && movie && movie.kind !== 'tv') {
+      openTitle('movie', movie.id, { history: 'none', scroll: false })
+    }
+    // 仅在语言变化时触发；openTitle 每次渲染都是新引用，不能进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiLang])
 
   // 首屏深链直开
   useEffect(() => {
@@ -695,13 +700,21 @@ export default function App() {
   return (
     <div className="flex min-h-screen flex-col">
       <PosterBackground />
-      <Header onHome={goHome} onLibrary={goLibrary} pinned={pins.pinned} onPickPinned={(p) => openTitle(p.kind, p.id)} onUnpin={(p) => pins.removePin(p.kind, p.id)} />
+      {/* 首次访问（localStorage 里还没有语言选择）时弹出的语言偏好选择 */}
+      <LanguagePicker />
+      <Header onHome={goHome} onLibrary={goLibrary} />
+      {/* 左侧固定收藏栏（收起的抽屉）：Pin 后卡片从右侧滑入并常驻页面左边缘 */}
+      <PinnedDrawer
+        pinned={pins.pinned}
+        onPick={(p) => openTitle(p.kind, p.id)}
+        onUnpin={(p) => pins.removePin(p.kind, p.id)}
+      />
 
-      {/* TV 演员跳转 TMDB 时的查找提示：右下角 toast */}
+      {/* TV 演员跳转 TMDB 时的查找提示：右下角 toast（上移避开语言切换按钮） */}
       {(personSearchLoading || personSearchError) && (
-        <div className="fixed bottom-6 right-6 z-[1100] border border-zinc-200 bg-white px-4 py-3 text-xs shadow-lg">
+        <div className="fixed bottom-20 right-6 z-[1100] border border-zinc-200 bg-white px-4 py-3 text-xs shadow-lg">
           {personSearchLoading ? (
-            <span className="text-zinc-700">Looking up person on TMDB…</span>
+            <span className="text-zinc-700">{t('detail.lookingUpPerson')}</span>
           ) : (
             <span className="text-red-600">{personSearchError}</span>
           )}
@@ -710,17 +723,17 @@ export default function App() {
       {view === 'library' ? (
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-24"
-          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
         >
           <LibraryPage
             onOpenTitle={(kind, id) => (kind === 'tv' ? openShow(id) : openMovie(id))}
+            onOpenPerson={openPerson}
+            onOpenGenre={openGenre}
             onGoHome={goHome}
           />
         </main>
       ) : view === 'person' ? (
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
-          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
         >
           {person && (
             <PersonPage
@@ -736,7 +749,6 @@ export default function App() {
       ) : view === 'genre' ? (
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
-          style={{ fontFamily: "'Inter', Arial, sans-serif" }}
         >
           {genre && (
             <GenrePage
@@ -753,9 +765,8 @@ export default function App() {
       ) : (
       <main
         className={`mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24 ${
-          movie ? 'max-w-5xl px-4 sm:px-6' : 'px-4 sm:px-8 lg:px-12'
+          movie || detailLoading ? 'max-w-5xl px-4 sm:px-6' : 'px-4 sm:px-8 lg:px-12'
         }`}
-        style={{ fontFamily: "'Inter', Arial, sans-serif" }}
       >
       <h1>
         <button
@@ -765,7 +776,7 @@ export default function App() {
           LUMENFRAME
         </button>
       </h1>
-      <p className="mt-3 text-center text-xs uppercase tracking-[0.3em] text-zinc-700">Every Frame Tells A Story</p>
+      <p className="mt-3 text-center text-xs uppercase tracking-[0.3em] text-zinc-700">{t('footer.tagline')}</p>
 
       {/* 搜索框 + 紧贴下方的实时建议下拉面板（电影与剧集混合搜索，无需切换） */}
       <div ref={searchBoxRef} className="relative z-40 mx-auto mt-12 w-full max-w-xl">
@@ -774,7 +785,7 @@ export default function App() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true) }}
             onFocus={() => { if (query.trim()) setDropdownOpen(true) }}
-            placeholder="Search movies & TV shows, e.g. Interstellar or Breaking Bad"
+            placeholder={t('search.placeholder')}
             autoComplete="off"
             className="flex-1 bg-transparent py-3 text-base text-black outline-none placeholder:text-zinc-500"
           />
@@ -783,24 +794,24 @@ export default function App() {
             disabled={suggestLoading || !query.trim()}
             className="px-6 py-3 text-sm uppercase tracking-widest text-black transition hover:bg-black hover:text-white disabled:opacity-40"
           >
-            {suggestLoading ? 'Searching' : 'Search'}
+            {suggestLoading ? t('common.searching') : t('common.search')}
           </button>
         </form>
 
         {dropdownOpen && query.trim() && (
           <div className="absolute inset-x-0 top-full max-h-[60vh] overflow-y-auto border border-zinc-300 border-t-0 bg-white shadow-xl">
             {suggestLoading && results.length === 0 && personResults.length === 0 && (
-              <p className="px-4 py-6 text-center text-sm text-zinc-600">Searching…</p>
+              <p className="px-4 py-6 text-center text-sm text-zinc-600">{t('common.searching')}…</p>
             )}
             {!suggestLoading && results.length === 0 && personResults.length === 0 && (
-              <p className="px-4 py-6 text-center text-sm text-zinc-600">No results found</p>
+              <p className="px-4 py-6 text-center text-sm text-zinc-600">{t('common.noResults')}</p>
             )}
 
             {/* People 段：TMDB 演职员结果 */}
             {personResults.length > 0 && (
               <>
                 <p className="sticky top-0 bg-white px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-400">
-                  People
+                  {t('common.people')}
                 </p>
                 {personResults.map((p) => {
                   const profile = p.profile_path ? posterUrl(p.profile_path, 'w185') : null
@@ -827,7 +838,7 @@ export default function App() {
                           <SmartImage src={profile} alt="" className="h-full w-full" objectFit="cover" />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center text-[9px] uppercase tracking-wider text-zinc-400">
-                            No photo
+                            {t('common.noPhoto')}
                           </div>
                         )}
                       </div>
@@ -842,7 +853,7 @@ export default function App() {
                         </p>
                         {knownTitles.length > 0 && (
                           <p className="mt-1 line-clamp-1 text-xs text-zinc-600">
-                            Known for: {knownTitles.join(', ')}
+                            {t('search.knownFor')}{knownTitles.join(', ')}
                           </p>
                         )}
                       </div>
@@ -850,7 +861,7 @@ export default function App() {
                   )
                 })}
                 <p className="sticky bottom-0 bg-white px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-400">
-                  Titles
+                  {t('common.titles')}
                 </p>
               </>
             )}
@@ -865,8 +876,9 @@ export default function App() {
                   className="flex w-full gap-3 border-b border-zinc-100 px-3 py-3 text-left transition last:border-0 hover:bg-zinc-50"
                 >
                   {/* 固定 2:3 海报框 + object-cover，任何海报都不会拉伸 */}
-                  <div className="h-24 w-16 shrink-0 overflow-hidden bg-zinc-100">
+                  <div className="relative h-24 w-16 shrink-0 overflow-hidden bg-zinc-100">
                     <SmartImage src={poster} alt="" className="h-full w-full" />
+                    <StatusBadge kind={isTv ? 'tv' : 'movie'} id={m.id} size="sm" />
                   </div>
                   <div className="min-w-0 flex-1 py-0.5">
                     <p className="truncate text-sm font-semibold text-zinc-900">
@@ -882,7 +894,7 @@ export default function App() {
                       )}
                     </p>
                     <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-zinc-600">
-                      {m.overview || 'No description available.'}
+                      {m.overview || t('common.noDescription')}
                     </p>
                   </div>
                 </button>
@@ -902,7 +914,7 @@ export default function App() {
 
       {!movie && !detailLoading && <MovieCollage onPick={openMovie} />}
 
-      {detailLoading && <p className="mt-8 text-sm text-zinc-600">Loading…</p>}
+      {detailLoading && <DetailHeaderSkeleton />}
 
       {movie && !detailLoading && (
         // 返回：应用内进入走浏览器历史；深链直开（无上一页）则回主页
@@ -915,7 +927,7 @@ export default function App() {
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
-          Back
+          {t('detail.back')}
         </button>
       )}
 
@@ -941,8 +953,8 @@ export default function App() {
                   })
                 }
               }}
-              aria-label={lib.isInLikes(kind, movie.id) ? 'Remove from likes' : 'Add to likes'}
-              title={lib.isInLikes(kind, movie.id) ? 'Remove from likes' : 'Add to likes'}
+              aria-label={lib.isInLikes(kind, movie.id) ? t('detail.removeFromLikes') : t('detail.addToLikes')}
+              title={lib.isInLikes(kind, movie.id) ? t('detail.removeFromLikes') : t('detail.addToLikes')}
               className={`flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
                 lib.isInLikes(kind, movie.id) ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-500'
               }`}
@@ -953,8 +965,8 @@ export default function App() {
             </button>
             <button
               onClick={() => pins.togglePin(movie)}
-              aria-label={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
-              title={pins.isPinned(kind, movie.id) ? 'Unpin from nav' : 'Pin to nav'}
+              aria-label={pins.isPinned(kind, movie.id) ? t('detail.unpinFromNav') : t('detail.pinToNav')}
+              title={pins.isPinned(kind, movie.id) ? t('detail.unpinFromNav') : t('detail.pinToNav')}
               className={`flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
                 pins.isPinned(kind, movie.id) ? 'text-black' : 'text-zinc-300 hover:text-zinc-500'
               }`}
@@ -965,12 +977,14 @@ export default function App() {
               </svg>
             </button>
           </div>
+          {/* 固定 2:3 海报框：与 DetailHeaderSkeleton 完全一致，shimmer 尺寸 = 海报尺寸，加载完成零跳动 */}
           <SmartImage
             src={poster}
             alt={movie.title}
             crossOrigin="anonymous"
-            objectFit="contain"
-            className="h-auto w-32 shrink-0 self-center shadow-md ring-1 ring-black/5 sm:w-48 sm:self-start"
+            aspect="2/3"
+            objectFit="cover"
+            className="w-32 shrink-0 self-center shadow-md ring-1 ring-black/5 sm:w-48 sm:self-start"
           />
           <div className="min-w-0 w-full flex-1 text-center sm:flex sm:flex-col sm:text-left">
             {/* 标题 */}
@@ -1004,7 +1018,7 @@ export default function App() {
               {isTv && movie.seasonsCount != null && (
                 <>
                   <span className="text-zinc-300">•</span>
-                  <span>{movie.seasonsCount} Season{movie.seasonsCount === 1 ? '' : 's'}</span>
+                  <span>{movie.seasonsCount} {movie.seasonsCount === 1 ? t('common.season') : t('common.seasons')}</span>
                 </>
               )}
               {isTv && movie.network && (
@@ -1027,22 +1041,23 @@ export default function App() {
               {(() => {
                 const chips = []
                 if (typeof movie.rating === 'number') {
-                  chips.push({ label: isTv ? 'TVmaze' : 'TMDB', value: movie.rating.toFixed(1), icon: '★' })
+                  chips.push({ label: isTv ? t('detail.tvmaze') : t('detail.tmdb'), value: movie.rating.toFixed(1), icon: '★' })
                 }
                 if (ratings?.imdb != null) {
-                  chips.push({ label: 'IMDb', value: ratings.imdb.toFixed(1) })
+                  chips.push({ label: t('detail.imdb'), value: ratings.imdb.toFixed(1) })
                 }
                 if (ratings?.rotten_tomatoes != null) {
-                  chips.push({ label: 'Critics', value: `${ratings.rotten_tomatoes}%`, tone: ratings.rotten_tomatoes >= 60 ? 'green' : 'red' })
+                  chips.push({ label: t('detail.critics'), value: `${ratings.rotten_tomatoes}%`, tone: ratings.rotten_tomatoes >= 60 ? 'green' : 'red' })
                 }
                 if (ratings?.popcornmeter != null) {
-                  chips.push({ label: 'Audience', value: `${ratings.popcornmeter}%`, tone: ratings.popcornmeter >= 60 ? 'green' : 'red' })
+                  chips.push({ label: t('detail.audience'), value: `${ratings.popcornmeter}%`, tone: ratings.popcornmeter >= 60 ? 'green' : 'red' })
                 }
                 if (ratings?.metacritic != null) {
                   const mc = ratings.metacritic
                   const mcTone = mc >= 60 ? 'green' : mc >= 40 ? 'amber' : 'red'
-                  chips.push({ label: 'Metascore', value: String(mc), tone: mcTone })
+                  chips.push({ label: t('detail.metascore'), value: String(mc), tone: mcTone })
                 }
+                if (ratingsLoading) return <RatingsSkeleton />
                 if (chips.length === 0) return null
                 const toneStyles = {
                   green: { box: 'border-green-200 bg-green-50', text: 'text-green-700' },
@@ -1076,7 +1091,7 @@ export default function App() {
               <div className="flex flex-col items-center gap-2">
                 {/* My Score 星级 */}
                 <div className="flex flex-wrap items-center justify-center gap-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">My score</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{t('detail.myScore')}</span>
                   <div className="flex items-center gap-0.5">
                     {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                       <button
@@ -1098,7 +1113,7 @@ export default function App() {
                       onClick={() => changePersonal(0)}
                       className="ml-1 text-xs text-zinc-400 underline transition hover:text-zinc-600"
                     >
-                      clear
+                      {t('common.clear')}
                     </button>
                   )}
                 </div>
@@ -1111,7 +1126,7 @@ export default function App() {
                         ? lib.removeFromWatched(kind, movie.id)
                         : lib.addToWatched({ ...movie, ratings }, personal)
                     }
-                    label="Watched"
+                    label={t('detail.watched')}
                   />
                   <WatchButton
                     active={lib.isInWatchLater(kind, movie.id)}
@@ -1120,7 +1135,7 @@ export default function App() {
                         ? lib.removeFromWatchLater(kind, movie.id)
                         : lib.addToWatchLater(movie)
                     }
-                    label="Watch Later"
+                    label={t('detail.watchLater')}
                   />
                 </div>
               </div>
@@ -1133,15 +1148,15 @@ export default function App() {
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                 </svg>
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">My Note</span>
+                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('detail.myNote')}</span>
                 {note && (
-                  <span className="text-[10px] text-zinc-400">auto-saved</span>
+                  <span className="text-[10px] text-zinc-400">{t('detail.autoSaved')}</span>
                 )}
               </div>
               <textarea
                 value={note}
                 onChange={(e) => handleNoteChange(e.target.value)}
-                placeholder="Write a short review or note about this title…"
+                placeholder={t('detail.notePlaceholder')}
                 rows={3}
                 className="w-full resize-none border border-zinc-300 bg-white p-3 text-sm leading-relaxed text-zinc-800 outline-none transition focus:border-black"
               />
@@ -1163,12 +1178,12 @@ export default function App() {
           <dl className="mt-5 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
             {movie.genres?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Genres</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.genres')}</dt>
                 <dd className="text-zinc-800">
                   {movie.genres.map((g, idx) => (
                     <button
                       key={`${g}-${idx}`}
-                      onClick={() => openGenreByName(g, genreSource)}
+                      onClick={() => openGenreByName(g, genreSource, idx)}
                       className="text-left text-zinc-800 underline-offset-2 transition hover:text-black hover:underline"
                     >
                       {idx > 0 && <span className="text-zinc-400">, </span>}
@@ -1180,7 +1195,7 @@ export default function App() {
             )}
             {movie.credits?.director && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Director</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.director')}</dt>
                 <dd className="text-zinc-800">
                   <button
                     onClick={() => openPerson({
@@ -1197,7 +1212,7 @@ export default function App() {
             )}
             {movie.credits?.writers?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Writers</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.writers')}</dt>
                 <dd className="text-zinc-800">
                   {movie.credits.writers.map((name, idx) => (
                     <button
@@ -1218,7 +1233,7 @@ export default function App() {
             )}
             {movie.credits?.cast?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Starring</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.starring')}</dt>
                 <dd className="text-zinc-800">
                   {movie.credits.cast.slice(0, 5).map((p, idx) => (
                     <button
@@ -1240,39 +1255,40 @@ export default function App() {
                 </dd>
               </div>
             )}
+            {specsLoading && <SpecsSkeleton />}
             {specs?.cameras?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Camera</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.camera')}</dt>
                 <dd className="text-zinc-800">{specs.cameras.slice(0, 3).join(', ')}</dd>
               </div>
             )}
             {specs?.lenses?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Lenses</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.lenses')}</dt>
                 <dd className="text-zinc-800">{specs.lenses.slice(0, 2).join(', ')}</dd>
               </div>
             )}
             {specs?.aspectRatios?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Aspect Ratio</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.aspectRatio')}</dt>
                 <dd className="text-zinc-800">{specs.aspectRatios[0]}</dd>
               </div>
             )}
             {specs?.negativeStocks?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Negative</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.negative')}</dt>
                 <dd className="text-zinc-800">{specs.negativeStocks[0]}</dd>
               </div>
             )}
             {specs?.processes?.length > 0 && (
               <div className="flex gap-2 text-sm">
-                <dt className="shrink-0 font-medium text-zinc-500">Process</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.process')}</dt>
                 <dd className="text-zinc-800">{specs.processes[0]}</dd>
               </div>
             )}
             {ratings?.awards && (
               <div className="flex gap-2 text-sm sm:col-span-2">
-                <dt className="shrink-0 font-medium text-zinc-500">Awards</dt>
+                <dt className="shrink-0 font-medium text-zinc-500">{t('detail.awards')}</dt>
                 <dd className="text-zinc-800">{ratings.awards}</dd>
               </div>
             )}
@@ -1287,21 +1303,21 @@ export default function App() {
           .slice(0, 10)
         const total = altPosters.length + backdrops.length
         return (
-          <CollapsibleSection title="Posters & Backdrops" count={total}>
+          <CollapsibleSection title={t('detail.postersAndBackdrops')} count={total}>
             {/* Posters */}
             <div>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Posters</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">{t('detail.posters')}</h3>
               {imagesLoading ? (
                 <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                  Loading posters…
+                  {t('detail.loadingPosters')}
                 </div>
               ) : altPosters.length === 0 ? (
                 <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
-                  No alternative posters available.
+                  {t('detail.noAltPosters')}
                 </div>
               ) : (
                 <>
-                  <p className="mb-3 text-xs text-zinc-700">Tap a poster to use it on your generated card.</p>
+                  <p className="mb-3 text-xs text-zinc-700">{t('detail.tapPosterForCard')}</p>
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3">
                     {altPosters.map((p, i) => {
                       const thumb = apiUrl(`/api/image?path=${encodeURIComponent(p.file_path)}&s=w342`)
@@ -1318,7 +1334,7 @@ export default function App() {
                             type="button"
                             onClick={() => setCardImage(isSelected ? null : full)}
                             className="absolute inset-0 h-full w-full"
-                            aria-label={isSelected ? 'Remove poster from card' : 'Use this poster on card'}
+                            aria-label={isSelected ? t('detail.removePosterFromCard') : t('detail.useThisPosterOnCard')}
                           >
                             <img
                               src={thumb}
@@ -1331,7 +1347,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setActivePoster(full) }}
-                            aria-label="Preview poster"
+                            aria-label={t('detail.previewPoster')}
                             className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
                           >
                             <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1343,7 +1359,7 @@ export default function App() {
                           </button>
                           {isSelected && (
                             <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                              On card
+                              {t('common.onCard')}
                             </span>
                           )}
                         </div>
@@ -1356,18 +1372,18 @@ export default function App() {
 
             {/* Backdrops */}
             <div className="mt-6">
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">Backdrops</h3>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">{t('detail.backdrops')}</h3>
               {imagesLoading ? (
                 <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-                  Loading backdrops…
+                  {t('detail.loadingBackdrops')}
                 </div>
               ) : backdrops.length === 0 ? (
                 <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
-                  No backdrops available.
+                  {t('detail.noBackdrops')}
                 </div>
               ) : (
                 <>
-                  <p className="mb-3 text-xs text-zinc-700">Tap a backdrop to use it on your generated card.</p>
+                  <p className="mb-3 text-xs text-zinc-700">{t('detail.tapBackdropForCard')}</p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
                     {backdrops.map((b, i) => {
                       const thumb = apiUrl(`/api/image?path=${encodeURIComponent(b.file_path)}&s=w780`)
@@ -1384,7 +1400,7 @@ export default function App() {
                             type="button"
                             onClick={() => setCardImage(isSelected ? null : full)}
                             className="absolute inset-0 h-full w-full"
-                            aria-label={isSelected ? 'Remove backdrop from card' : 'Use this backdrop on card'}
+                            aria-label={isSelected ? t('detail.removeBackdropFromCard') : t('detail.useThisBackdropOnCard')}
                           >
                             <img
                               src={thumb}
@@ -1397,7 +1413,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setActiveBackdrop(full) }}
-                            aria-label="Preview backdrop"
+                            aria-label={t('detail.previewBackdrop')}
                             className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
                           >
                             <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1409,7 +1425,7 @@ export default function App() {
                           </button>
                           {isSelected && (
                             <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                              On card
+                              {t('common.onCard')}
                             </span>
                           )}
                         </div>
@@ -1437,7 +1453,7 @@ export default function App() {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); downloadImage(activePoster, `${movie?.title || 'poster'} - poster.jpg`) }}
-            aria-label="Download poster"
+            aria-label={t('detail.downloadPoster')}
             className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1463,7 +1479,7 @@ export default function App() {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); downloadImage(activeBackdrop, `${movie?.title || 'backdrop'} - backdrop.jpg`) }}
-            aria-label="Download backdrop"
+            aria-label={t('detail.downloadBackdrop')}
             className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1502,7 +1518,7 @@ export default function App() {
       )}
 
       {movie && !detailLoading && (
-        <CollapsibleSection title="Recommendations">
+        <CollapsibleSection title={t('detail.recommendations')}>
           <TasteDiveSimilar
             key={`similar-${movie.id}`}
             movie={movie}

@@ -14,7 +14,17 @@ const _fgBase = import.meta.env.VITE_FILMGRAB_BASE
 export const FILMGRAB_BASE =
   _fgBase != null && _fgBase !== '' ? _fgBase : import.meta.env.DEV ? '/filmgrab' : ''
 
+import { apiLang } from './i18n'
+
 export const apiUrl = (path) => `${API_BASE}${path}`
+
+// 文本类接口自动携带语言参数（TMDB 支持多语言：搜索/详情/类型/演职员/推荐）。
+// 图片代理、TVmaze（剧集）、字幕、评分、流媒体等与语言无关的接口继续用 apiUrl，
+// 避免同一份数据被拆成多套缓存。后端白名单校验 lang，非法值会回退 en-US。
+export const apiUrlWithLang = (path) => {
+  const sep = path.includes('?') ? '&' : '?'
+  return apiUrl(`${path}${sep}lang=${apiLang()}`)
+}
 
 // 海报走后端图片代理；卡片导出时用 w1280 保证清晰度
 export const posterUrl = (path, size = 'w500') =>

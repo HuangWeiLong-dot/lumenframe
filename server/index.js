@@ -107,26 +107,102 @@ async function getImage(path, size) {
   return shared
 }
 
-async function tmdb(path, params = {}) {
+// TMDB 支持多语言：language 先写入，params 里的 language 仍可覆盖（/images 路由需要）
+async function tmdb(path, params = {}, lang = 'en-US') {
   const url = new URL(TMDB_API + path)
   url.searchParams.set('api_key', API_KEY)
-  url.searchParams.set('language', 'en-US')
+  url.searchParams.set('language', lang)
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
   const res = await fetch(url)
   if (!res.ok) throw new Error(`TMDB ${res.status}`)
   return res.json()
 }
 
+// ---- 多语言（API 层面支持中文）----
+// 前端通过 ?lang=zh-CN 请求中文本地化信息（标题/简介/类型/人物简介等）。
+// 例外（无中文能力或依赖英文做匹配，一律固定 en-US，见各路由注释）：
+//   TVmaze（剧集）、TasteDive（英文片名匹配）、ShotOnWhat / Rotten Tomatoes（按英文片名抓取）、
+//   trailer（预告片排序依赖英文 "Official Trailer"）。
+const LANGS = new Set(['en-US', 'zh-CN', 'zh-TW'])
+function reqLang(req) {
+  const raw = String(req.query.lang || '').trim()
+  if (LANGS.has(raw)) return raw
+  if (/^zh\b/i.test(raw)) return 'zh-CN' // zh / zh-Hans / zh-CN 统一到简体
+  return 'en-US'
+}
+// 语言相关结果必须按语言分桶缓存，否则中英会互相污染
+const lk = (key, lang) => `${key}:${lang}`
+// 纯 ASCII 判定：非 ASCII 片名交给英文源（OMDB/RT/ShotOnWhat）查询必然失败，需先反查英文名
+const isAsciiText = (s) => !/[^\x20-\x7E]/.test(String(s || ''))
+
+// 用 IMDb ID 反查英文片名（TMDB find + en-US），供只认英文名的第三方服务使用
+async function englishTitleByImdb(imdbId, title) {
+  if (isAsciiText(title)) return title
+  try {
+    return await cached(lk(`entitle:${imdbId}`, 'en-US'), async () => {
+      const found = await tmdb(`/find/${imdbId}`, { external_source: 'imdb_id' }, 'en-US')
+      const hit = (found.movie_results || [])[0] || (found.tv_results || [])[0]
+      return hit?.title || hit?.name || title
+    })
+  } catch {
+    return title
+  }
+}
+
+// 用 TMDB id 反查英文片名（TasteDive 等只认英文名，中文界面下的中文片名需先还原）
+async function englishTitleByTmdbId(id, title) {
+  if (isAsciiText(title)) return title
+  try {
+    const m = await moviePayload(id, 'en-US')
+    return m?.title || title
+  } catch {
+    return title
+  }
+}
+
+// 取某语言的 TMDB 电影原始载荷（键与 /api/movie/:id 完全一致，两个路由互相命中缓存）
+async function moviePayload(id, lang) {
+  return cached(lk(`movie:${id}`, lang), () =>
+    tmdb(`/movie/${id}`, { append_to_response: 'credits' }, lang)
+  )
+}
+
+// 中文界面下，把「靠英文匹配得到的 TMDB 电影列表」回填为中文标题/海报
+// （TasteDive 用英文片名匹配，其输出默认是英文；此处按目标语言补齐）
+async function localizeMovieList(items, lang) {
+  if (lang === 'en-US' || items.length === 0) return items
+  return Promise.all(
+    items.map(async (it) => {
+      const movieId = it.tmdb_id ?? it.id
+      if (!movieId) return it
+      try {
+        const m = await moviePayload(movieId, lang)
+        return {
+          ...it,
+          title: m.title || it.title,
+          year: (m.release_date || '').slice(0, 4) || it.year,
+          rating: m.vote_average ?? it.rating,
+          poster_path: m.poster_path || it.poster_path,
+        }
+      } catch {
+        return it
+      }
+    })
+  )
+}
+
 // 混合搜索：TMDB 电影 + TVmaze 剧集，一次返回两类结果（kind 字段区分）。
 // 两个 API 结果互相补全海报：当某条缺海报时，从另一个 API 的同名（+同年）条目中取海报。
 // 不额外发请求，仅复用本次两个搜索结果，避免触碰各自的 rate limit。
+// 语言：电影部分跟随 ?lang（中文关键词可直接搜到中文片名/简介）；剧集来自 TVmaze，恒为英文。
 app.get('/api/search', async (req, res) => {
   const q = String(req.query.q || '').trim()
   if (!q) return res.json({ results: [] })
+  const lang = reqLang(req)
   try {
     const [tmdbRes, tvRes] = await Promise.all([
-      cached(`search:movie:${q}`, () =>
-        tmdb('/search/movie', { query: q, include_adult: false })
+      cached(lk(`search:movie:${q}`, lang), () =>
+        tmdb('/search/movie', { query: q, include_adult: false }, lang)
       ),
       cached(`search:tv:${q}`, () => searchShows(q)).catch((e) => {
         console.error('[search] TVmaze search failed:', e.message)
@@ -137,6 +213,7 @@ app.get('/api/search', async (req, res) => {
       kind: 'movie',
       id: m.id,
       title: m.title,
+      original_title: m.original_title || null, // 跨源海报互补 / 英文服务查询用
       year: (m.release_date || '').slice(0, 4),
       rating: m.vote_average,
       overview: m.overview || '',
@@ -154,10 +231,13 @@ app.get('/api/search', async (req, res) => {
 
     // 海报互补：以 normalizeTitle + year 为键，收集所有有海报的条目；
     // 缺海报的条目从同键的另一个 API 结果取海报字段。
+    // 注意：lang=zh 时 TMDB 标题是中文，而 normalizeTitle 会过滤掉非 ASCII（结果为空串），
+    // 会导致同年条目 key 全部塌缩到一起 —— 所以电影统一用 original_title 参与配对。
     const posterPool = new Map() // key -> { poster_path?, tvPoster? }
-    const keyOf = (t, y) => `${normalizeTitle(t)}::${y || ''}`
+    const keyTitle = (it) => (it.kind === 'movie' ? it.original_title || it.title : it.title)
+    const keyOf = (t, y) => `${normalizeTitle(t) || String(t || '').trim().toLowerCase()}::${y || ''}`
     for (const it of [...movies, ...shows]) {
-      const k = keyOf(it.title, it.year)
+      const k = keyOf(keyTitle(it), it.year)
       const cur = posterPool.get(k) || {}
       if (it.poster_path) cur.poster_path = it.poster_path
       if (it.tvPoster) cur.tvPoster = it.tvPoster
@@ -165,7 +245,7 @@ app.get('/api/search', async (req, res) => {
     }
     const fillPoster = (it) => {
       if (it.poster_path || it.tvPoster) return it
-      const p = posterPool.get(keyOf(it.title, it.year))
+      const p = posterPool.get(keyOf(keyTitle(it), it.year))
       if (!p) return it
       return { ...it, poster_path: p.poster_path || null, tvPoster: p.tvPoster || null }
     }
@@ -180,11 +260,14 @@ app.get('/api/search', async (req, res) => {
 })
 
 // 电影详情（海报、标题、评分、年份、IMDb ID、演职员）
+// ?lang=zh-CN 返回中文标题/简介/类型名；同时给出 title_en（英文原名）供只认英文名的服务使用
 app.get('/api/movie/:id', async (req, res) => {
+  const lang = reqLang(req)
   try {
-    const m = await cached(`movie:${req.params.id}`, () =>
-      tmdb(`/movie/${req.params.id}`, { append_to_response: 'credits' })
-    )
+    // en-US 详情与目标语言详情并行取（前者用于 title_en，且与英文页共享缓存）
+    const enPromise = lang === 'en-US' ? null : moviePayload(req.params.id, 'en-US').catch(() => null)
+    const m = await moviePayload(req.params.id, lang)
+    const en = enPromise ? await enPromise : null
     // crew 中 job 字段区分导演/编剧/摄影指导；cast 已按番位排序
     const crew = m.credits?.crew || []
     const seen = new Set()
@@ -197,10 +280,13 @@ app.get('/api/movie/:id', async (req, res) => {
       id: m.id,
       title: m.title,
       original_title: m.original_title,
+      title_en: en?.title || m.title,
       year: (m.release_date || '').slice(0, 4),
       rating: m.vote_average,
       runtime: m.runtime || null,
+      // genres 是本地化后的名称（供展示），genre_ids 供点击跳转时反查（中文名无法命中静态映射表）
       genres: (m.genres || []).map((g) => g.name),
+      genre_ids: (m.genres || []).map((g) => g.id),
       overview: m.overview,
       poster_path: m.poster_path,
       imdb_id: m.imdb_id,
@@ -224,12 +310,14 @@ app.get('/api/movie/:id', async (req, res) => {
 
 // 电影图片：备选海报（至多 10 张）+ 剧照 backdrops
 app.get('/api/movie/:id/images', async (req, res) => {
+  const lang = reqLang(req)
+  // 中文界面额外纳入中文海报（TMDB 上不少影片有简体海报）；en,null 始终保留做兜底
+  const imgLangs = lang.startsWith('zh') ? `${lang},en,null` : 'en,null'
   try {
-    const data = await cached(`movie:${req.params.id}:images`, () =>
-      // include_image_language=en,null：英语海报 + 无语言标注的原版海报
+    const data = await cached(lk(`movie:${req.params.id}:images`, lang), () =>
       tmdb(`/movie/${req.params.id}/images`, {
         language: 'en',
-        include_image_language: 'en,null',
+        include_image_language: imgLangs,
       })
     )
     const posters = (data.posters || [])
@@ -254,7 +342,7 @@ app.get('/api/movie/:id/images', async (req, res) => {
   }
 })
 
-// 热门电影海报列表（用于背景滚动墙）
+// 热门电影海报列表（用于背景滚动墙）——仅用海报，与语言无关，不做 lang 处理
 app.get('/api/trending', async (req, res) => {
   try {
     const data = await cached('trending:week', () =>
@@ -278,12 +366,14 @@ app.get('/api/trending', async (req, res) => {
 })
 
 // 演职员搜索：用名字查 TMDB person id（用于在 TV 剧集 cast 上做跨源跳转）
+// 中文界面下 TMDB 会返回本地化人名/代表作片名
 app.get('/api/person/search', async (req, res) => {
   const q = String(req.query.q || '').trim()
   if (!q) return res.json({ results: [] })
+  const lang = reqLang(req)
   try {
-    const data = await cached(`person:search:${q}`, () =>
-      tmdb('/search/person', { query: q, include_adult: false })
+    const data = await cached(lk(`person:search:${q}`, lang), () =>
+      tmdb('/search/person', { query: q, include_adult: false }, lang)
     )
     const limit = Number(req.query.limit) || 5
     const results = (data.results || [])
@@ -310,14 +400,16 @@ app.get('/api/person/search', async (req, res) => {
 })
 
 // 演职员详情 + 全部作品（电影 + 剧集），按 cast / Directing / Writing 分组
+// ?lang=zh-CN：人物简介、出生地、作品片名走中文（TMDB 无中文资料时自动回退原名）
 app.get('/api/person/:id/credits', async (req, res) => {
+  const lang = reqLang(req)
   try {
     const [creditsData, info] = await Promise.all([
-      cached(`person:${req.params.id}:credits`, () =>
-        tmdb(`/person/${req.params.id}/combined_credits`)
+      cached(lk(`person:${req.params.id}:credits`, lang), () =>
+        tmdb(`/person/${req.params.id}/combined_credits`, {}, lang)
       ),
-      cached(`person:${req.params.id}:info`, () =>
-        tmdb(`/person/${req.params.id}`)
+      cached(lk(`person:${req.params.id}:info`, lang), () =>
+        tmdb(`/person/${req.params.id}`, {}, lang)
       ).catch(() => ({})),
     ])
 
@@ -334,6 +426,7 @@ app.get('/api/person/:id/credits', async (req, res) => {
             kind: 'tv',
             id: e.id,
             title: e.name || e.original_name || '',
+            original_title: e.original_name || null, // 原名：中文界面下用它去 TVmaze 匹配（TVmaze 只有英文名）
             year: (e.first_air_date || '').slice(0, 4),
             character: e.character || null,
             job: e.job || null,
@@ -345,6 +438,7 @@ app.get('/api/person/:id/credits', async (req, res) => {
             kind: 'movie',
             id: e.id,
             title: e.title || e.original_title || '',
+            original_title: e.original_title || null,
             year: (e.release_date || '').slice(0, 4),
             character: e.character || null,
             job: e.job || null,
@@ -383,22 +477,24 @@ app.get('/api/person/:id/credits', async (req, res) => {
 })
 
 // 类型发现：列出某 genre 下的电影或剧集，分页
+// ?lang=zh-CN：片名/简介本地化
 app.get('/api/genre/:kind/:id', async (req, res) => {
   const kind = req.params.kind === 'tv' ? 'tv' : 'movie'
   const genreId = Number(req.params.id)
   const page = Math.max(1, Number(req.query.page) || 1)
+  const lang = reqLang(req)
   if (!genreId) return res.status(400).json({ error: 'invalid genre id' })
   try {
     // 客户端每页 10 条，TMDB 每页 20 条 → 拆分取半
     const tmdbPage = Math.ceil(page / 2)
     const isFirstHalf = page % 2 === 1
-    const data = await cached(`genre:${kind}:${genreId}:p${tmdbPage}`, () =>
+    const data = await cached(lk(`genre:${kind}:${genreId}:p${tmdbPage}`, lang), () =>
       tmdb(`/discover/${kind}`, {
         with_genres: genreId,
         sort_by: 'popularity.desc',
         page: tmdbPage,
         'vote_count.gte': kind === 'tv' ? 50 : 100,
-      })
+      }, lang)
     )
     const allItems = (data.results || [])
       .filter((m) => m.poster_path)
@@ -423,13 +519,15 @@ app.get('/api/genre/:kind/:id', async (req, res) => {
 })
 
 // 第三方评分：OMDB API（IMDb / Rotten Tomatoes / Metacritic），懒加载，成功后文件缓存
+// RT 页面抓取只认英文片名：中文界面传进来的中文片名会先用 IMDb id 反查英文名
 app.get('/api/ratings/:imdbId', async (req, res) => {
-  const title = String(req.query.title || '').trim()
+  const rawTitle = String(req.query.title || '').trim()
   const year = String(req.query.year || '').trim()
-  if (!title || !/^\d{4}$/.test(year)) {
+  if (!rawTitle || !/^\d{4}$/.test(year)) {
     return res.status(400).json({ error: 'title and 4-digit year are required' })
   }
   try {
+    const title = await englishTitleByImdb(req.params.imdbId, rawTitle)
     const data = await getRatings(req.params.imdbId, title, year)
     res.set('x-cache', data.cache)
     res.json({ imdb: data.imdb, metacritic: data.metacritic, rotten_tomatoes: data.rotten_tomatoes, popcornmeter: data.popcornmeter, awards: data.awards })
@@ -439,6 +537,7 @@ app.get('/api/ratings/:imdbId', async (req, res) => {
 })
 
 // 预告片：TMDB /movie/{id}/videos 返回官方预告片 YouTube key（无需 YouTube 搜索配额）
+// 固定 en-US：挑选规则里的 "Official Trailer" 关键词依赖英文视频名，本地化会让排序失效
 app.get('/api/trailer/:tmdbId', async (req, res) => {
   const id = req.params.tmdbId
   if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tmdbId' })
@@ -564,15 +663,17 @@ app.get('/api/watch/tv/:imdbId', async (req, res) => {
 })
 
 // 相似影片推荐：基于类别（genres）—— 用当前电影的类型去 TMDB discover 找同类型高分片
+// ?lang=zh-CN：推荐结果标题本地化；类型 id 与语言无关，复用同语言的详情缓存即可
 app.get('/api/similar/:tmdbId', async (req, res) => {
   const id = req.params.tmdbId
   if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tmdbId' })
+  const lang = reqLang(req)
   try {
-    const results = await cached(`sim:movie:${id}`, async () => {
+    const results = await cached(lk(`sim:movie:${id}`, lang), async () => {
       // 1. 取当前电影的 genre_ids（复用 movie: 缓存，若无则请求一次）
       let genreIds = []
       try {
-        const detail = await cached(`movie:${id}`, () => tmdb(`/movie/${id}`))
+        const detail = await moviePayload(id, lang)
         genreIds = (detail.genres || []).map((g) => g.id)
       } catch {
         return []
@@ -587,7 +688,7 @@ app.get('/api/similar/:tmdbId', async (req, res) => {
         'vote_count.gte': 100,
         include_adult: false,
         page: 1,
-      })
+      }, lang)
       const picks = (data.results || [])
         .filter((m) => m.poster_path && String(m.id) !== String(id))
         .slice(0, 5)
@@ -610,6 +711,7 @@ app.get('/api/similar/:tmdbId', async (req, res) => {
 
 // 剧集相似推荐：基于类别（genres）—— 把 TVmaze 的类型映射到 TMDB tv genre id，
 // 用 TMDB discover/tv 找同类型高分剧，再用 TVmaze 搜索匹配回 TVmaze 条目（含海报）
+// 固定 en-US：TMDB 剧名要与 TVmaze 英文名做 titleScore 匹配，且输出条目本身来自 TVmaze（无中文）
 app.get('/api/similar/tv/:tvmazeId', async (req, res) => {
   const id = req.params.tvmazeId
   if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tvmazeId' })
@@ -678,13 +780,17 @@ app.get('/api/similar/tv/:tvmazeId', async (req, res) => {
 })
 
 // "看过这个的还喜欢"：优先 TasteDive 协同过滤，被 Cloudflare 封锁时降级 TMDB recommendations
+// ?lang=zh-CN：TasteDive 用英文片名匹配（内部固定 en-US），匹配结果再回填中文标题
 app.get('/api/liked/:tmdbId', async (req, res) => {
   const id = req.params.tmdbId
   if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tmdbId' })
-  const title = String(req.query.title || '').trim()
-  if (!title) return res.status(400).json({ error: 'title is required' })
+  const rawTitle = String(req.query.title || '').trim()
+  if (!rawTitle) return res.status(400).json({ error: 'title is required' })
+  const lang = reqLang(req)
   try {
-    const results = await cached(`liked:movie:${id}`, async () => {
+    // TasteDive 只认英文片名：中文界面传进来的中文片名先按 TMDB id 还原英文名
+    const title = await englishTitleByTmdbId(id, rawTitle)
+    const results = await cached(lk(`liked:movie:${id}`, lang), async () => {
       // 1) 优先 TasteDive
       if (TASTEDRIVE_KEY) {
         try {
@@ -735,15 +841,15 @@ app.get('/api/liked/:tmdbId', async (req, res) => {
               .filter(Boolean)
               .filter((m) => !seen.has(m.tmdb_id) && seen.add(m.tmdb_id))
               .slice(0, 5)
-            if (filtered.length > 0) return filtered
+            if (filtered.length > 0) return localizeMovieList(filtered, lang)
           }
         } catch {
           // TasteDive 失败（Cloudflare 403 等），降级到 TMDB recommendations
         }
       }
 
-      // 2) 降级：TMDB recommendations（直接返回带海报的完整条目）
-      const data = await tmdb(`/movie/${id}/recommendations`)
+      // 2) 降级：TMDB recommendations（直接返回带海报的完整条目，标题已是目标语言）
+      const data = await tmdb(`/movie/${id}/recommendations`, {}, lang)
       const picks = (data.results || [])
         .filter((m) => m.poster_path && String(m.id) !== String(id))
         .slice(0, 5)
@@ -761,6 +867,7 @@ app.get('/api/liked/:tmdbId', async (req, res) => {
 })
 
 // 剧集"看过这个的还喜欢"：优先 TasteDive，降级 TMDB tv recommendations
+// 固定 en-US：TasteDive 与 TVmaze 均为英文条目（TMDB 仅用于按英文剧名反查 TVmaze 条目）
 app.get('/api/liked/tv/:tvmazeId', async (req, res) => {
   const id = req.params.tvmazeId
   if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'invalid tvmazeId' })
@@ -850,13 +957,15 @@ app.get('/api/liked/tv/:tvmazeId', async (req, res) => {
 })
 
 // 技术参数：从 ShotOnWhat? 抓取（懒加载，成功后本地文件永久缓存）
+// 站点只认英文片名：中文界面传进来的中文片名会先用 IMDb id 反查英文名
 app.get('/api/specs/:imdbId', async (req, res) => {
-  const title = String(req.query.title || '').trim()
+  const rawTitle = String(req.query.title || '').trim()
   const year = String(req.query.year || '').trim()
-  if (!title || !/^\d{4}$/.test(year)) {
+  if (!rawTitle || !/^\d{4}$/.test(year)) {
     return res.status(400).json({ error: 'title and 4-digit year are required' })
   }
   try {
+    const title = await englishTitleByImdb(req.params.imdbId, rawTitle)
     const result = await getSpecs(req.params.imdbId, title, year)
     // “查不到”是正常空结果（新片未收录），用 200 返回避免浏览器把 404 打进控制台
     if (!result.found) return res.json({ found: false })
@@ -927,11 +1036,13 @@ app.get('/api/recommend/random', async (req, res) => {
 
   try {
     const endpoint = kind === 'movie' ? '/discover/movie' : '/discover/tv'
+    // 电影结果直接展示给用户 → 跟随 ?lang；剧集要用 TMDB 剧名匹配 TVmaze，固定 en-US
+    const lang = kind === 'movie' ? reqLang(req) : 'en-US'
     // 先请求第一页拿到 total_pages，再在有效范围内随机选页
-    const first = await tmdb(endpoint, { ...params, page: '1' })
+    const first = await tmdb(endpoint, { ...params, page: '1' }, lang)
     const totalPages = Math.min(first.total_pages || 1, 30)
     const randPage = Math.floor(Math.random() * totalPages) + 1
-    const data = randPage === 1 ? first : await tmdb(endpoint, { ...params, page: String(randPage) })
+    const data = randPage === 1 ? first : await tmdb(endpoint, { ...params, page: String(randPage) }, lang)
     const list = (data.results || []).filter((x) => x.poster_path)
     if (list.length === 0) return res.json({ result: null })
 

@@ -1,4 +1,5 @@
 import { useSyncExternalStore, useCallback } from 'react'
+import { safeGetJSON, safeSet } from '../storage'
 
 const STORAGE_KEY = 'lumenframe:library'
 const NOTES_KEY = 'lumenframe:notes'
@@ -8,22 +9,27 @@ const EVENT = 'lumenframe:library-change'
 // 旧数据没有 kind 字段，读取时按电影迁移。
 export const entryKey = (kind, id) => `${kind || 'movie'}:${id}`
 
+// 个人评分的本地标量 key（电影沿用旧 key，剧集带 tv: 前缀）。
+// 与 watched[].myRating 是两份数据：这里是「评了分但没加入片库」的兜底，
+// 云端同步以 watched[].myRating 为准。
+export function ratingStorageKey(kind, id) {
+  return kind === 'tv' ? `lumenframe:myrating:tv:${id}` : `lumenframe:myrating:${id}`
+}
+
 function readStore() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { watched: [], watchlater: [] }
-    const obj = JSON.parse(raw)
-    const fix = (arr) =>
-      (Array.isArray(arr) ? arr : []).map((m) =>
-        m.kind === 'tv' ? m : { ...m, kind: 'movie' }
-      )
-    return {
-      watched: fix(obj.watched),
-      watchlater: fix(obj.watchlater),
-      likes: Array.isArray(obj.likes) ? obj.likes : [],
-    }
-  } catch {
-    return { watched: [], watchlater: [], likes: [] }
+  // 无数据（首次访问 / 清空 localStorage）时也要返回完整的三个键，
+  // 否则 store.likes === undefined 会让观影库页面直接白屏。
+  // 注意每次都返回新对象：emit() 靠引用变化触发 useSyncExternalStore 重渲染。
+  const obj = safeGetJSON(STORAGE_KEY, null)
+  if (!obj || typeof obj !== 'object') return { watched: [], watchlater: [], likes: [] }
+  const fix = (arr) =>
+    (Array.isArray(arr) ? arr : []).map((m) =>
+      m.kind === 'tv' ? m : { ...m, kind: 'movie' }
+    )
+  return {
+    watched: fix(obj.watched),
+    watchlater: fix(obj.watchlater),
+    likes: Array.isArray(obj.likes) ? obj.likes : [],
   }
 }
 
@@ -32,22 +38,27 @@ let notesCache = readNotes()
 const listeners = new Set()
 
 function readNotes() {
-  try {
-    return JSON.parse(localStorage.getItem(NOTES_KEY) || '{}')
-  } catch {
-    return {}
-  }
+  const obj = safeGetJSON(NOTES_KEY, null)
+  return obj && typeof obj === 'object' ? obj : {}
 }
 
+// localStorage 可能被隐私模式/浏览器策略禁用或写满：写失败只影响持久化，
+// 不应让「加入观影库 / 评分 / 短评」等交互抛错崩掉页面（safeSet 见 ../storage）
 function writeNotes(next) {
   notesCache = next
-  localStorage.setItem(NOTES_KEY, JSON.stringify(next))
+  safeSet(NOTES_KEY, JSON.stringify(next))
 }
 
+// 只通知订阅者（保留内存缓存里的改动，即便持久化失败本次会话也生效）
+function notify() {
+  listeners.forEach((fn) => fn())
+}
+
+// 从存储重读（storage 事件：其它标签页写入后同步）
 function emit() {
   cache = readStore()
   notesCache = readNotes()
-  listeners.forEach((fn) => fn())
+  notify()
 }
 
 function subscribe(fn) {
@@ -68,8 +79,10 @@ function onStorage() {
 }
 
 function write(next) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-  emit()
+  // 先落内存缓存，再尝试持久化：存储不可用时改动仍在本会话有效
+  cache = next
+  safeSet(STORAGE_KEY, JSON.stringify(next))
+  notify()
 }
 
 /** Extract a lightweight metadata object from the full title API response. */
@@ -181,6 +194,29 @@ export function useLibrary() {
     })
   }, [cache])
 
+  // 语言切换后回填本地化标题（本地存的是加入时的语言；标题未变则不写入、不触发渲染）
+  const updateTitle = useCallback((kind, id, title) => {
+    if (!title) return
+    const key = entryKey(kind, id)
+    const patch = (list) => {
+      let changed = false
+      const next = list.map((m) => {
+        if (entryKey(m.kind, m.id) !== key || m.title === title) return m
+        changed = true
+        return { ...m, title }
+      })
+      return changed ? next : null
+    }
+    const watched = patch(cache.watched)
+    const watchlater = patch(cache.watchlater)
+    if (!watched && !watchlater) return
+    write({
+      ...cache,
+      watched: watched || cache.watched,
+      watchlater: watchlater || cache.watchlater,
+    })
+  }, [cache])
+
   // 短评：独立存储，不要求加入 watched；同步到 watched 条目里以便 Library 页和 Card Studio 使用
   const getNote = useCallback(
     (kind, id) => notesCache[entryKey(kind, id)] || '',
@@ -201,7 +237,7 @@ export function useLibrary() {
         ),
       })
     }
-    emit()
+    notify()
   }, [cache])
 
   // 批量刷新评分：找出 watched 中没有 ratings 的条目，逐个拉取
@@ -282,7 +318,7 @@ export function useLibrary() {
   return {
     watched: store.watched,
     watchlater: store.watchlater,
-    likes: store.likes,
+    likes: store.likes || [],
     addToWatched,
     removeFromWatched,
     addToWatchLater,
@@ -291,6 +327,7 @@ export function useLibrary() {
     isInWatchLater,
     updateMyRating,
     updateRatings,
+    updateTitle,
     refreshAllRatings,
     getNote,
     setNote,
@@ -298,4 +335,28 @@ export function useLibrary() {
     removeFromLikes,
     isInLikes,
   }
+}
+
+// ---- 云端同步层入口（非组件代码使用，见 ../sync/engine.js）----
+// 复用同一 listeners 集合：write() 之后同步层与组件收到的是同一次通知。
+
+export function subscribeLibrary(fn) {
+  return subscribe(fn)
+}
+
+// 当前快照的原始引用。调用方只读，不要就地修改。
+export function getLibraryState() {
+  return { library: cache, notes: notesCache }
+}
+
+// 把合并结果写回：走 write/writeNotes，保证内存缓存、localStorage、
+// 组件重渲染三者一起更新。library 必须整对象一次传入——分两次 write 会多通知一次，
+// 中间还会短暂暴露「watched 已更新、likes 还是旧的」的混合状态。
+export function applyRemoteLibrary(next) {
+  write(next)
+}
+
+export function applyRemoteNotes(next) {
+  writeNotes(next)
+  notify()
 }

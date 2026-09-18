@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import SmartImage from './SmartImage'
-import { apiUrl, posterFor } from '../api'
+import { apiUrlWithLang, posterFor } from '../api'
+import { useI18n } from '../i18n'
 
 const DECADES = ['any', '1970s', '1980s', '1990s', '2000s', '2010s', '2020s']
 
@@ -69,6 +70,7 @@ function StepIndicator({ current }) {
 }
 
 export default function QuizRecommender({ onPick }) {
+  const { t } = useI18n()
   const [step, setStep] = useState(0)
   const [kind, setKind] = useState('movie')
   const [decade, setDecade] = useState('any')
@@ -91,17 +93,17 @@ export default function QuizRecommender({ onPick }) {
     if (!reroll) setResult(null)
     try {
       const qs = new URLSearchParams({ kind, decade, genres: genres.join(',') })
-      const r = await fetch(apiUrl(`/api/recommend/random?${qs}`))
+      const r = await fetch(apiUrlWithLang(`/api/recommend/random?${qs}`))
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data = await r.json()
       if (!data.result) {
-        setError('No match found. Try different filters.')
+        setError(t('quiz.noMatch'))
       } else {
         setResult(data.result)
         setStep(3)
       }
     } catch (e) {
-      setError('Recommendation service unavailable right now.')
+      setError(t('quiz.unavailable'))
     } finally {
       setLoading(false)
     }
@@ -119,7 +121,7 @@ export default function QuizRecommender({ onPick }) {
   const poster = result ? posterFor(result, 'w342') : ''
 
   return (
-    <CollapsibleSection title="Surprise Me" defaultOpen>
+    <CollapsibleSection title={t('quiz.surpriseMe')} defaultOpen>
       <div className="space-y-5">
         {step < 3 && <StepIndicator current={step} />}
 
@@ -127,12 +129,12 @@ export default function QuizRecommender({ onPick }) {
         {step === 0 && (
           <div>
             <h3 className="mb-4 text-base font-bold text-zinc-900">
-              What are you in the mood for?
+              {t('quiz.mood')}
             </h3>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { key: 'movie', label: 'Movie', desc: 'Feature films' },
-                { key: 'tv', label: 'TV Show', desc: 'Series & episodes' },
+                { key: 'movie', label: t('quiz.movie'), desc: t('quiz.movieDesc') },
+                { key: 'tv', label: t('quiz.tvShow'), desc: t('quiz.tvShowDesc') },
               ].map((opt) => (
                 <button
                   key={opt.key}
@@ -162,7 +164,7 @@ export default function QuizRecommender({ onPick }) {
                 onClick={() => setStep(1)}
                 className="bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
               >
-                Continue →
+                {t('quiz.continue')}
               </button>
             </div>
           </div>
@@ -171,11 +173,11 @@ export default function QuizRecommender({ onPick }) {
         {/* Step 1: 年代 */}
         {step === 1 && (
           <div>
-            <h3 className="mb-4 text-base font-bold text-zinc-900">Which era?</h3>
+            <h3 className="mb-4 text-base font-bold text-zinc-900">{t('quiz.era')}</h3>
             <div className="flex flex-wrap gap-2">
               {DECADES.map((d) => (
                 <Chip key={d} active={decade === d} onClick={() => setDecade(d)}>
-                  {d === 'any' ? 'Any' : d}
+                  {d === 'any' ? t('quiz.any') : d}
                 </Chip>
               ))}
             </div>
@@ -185,14 +187,14 @@ export default function QuizRecommender({ onPick }) {
                 onClick={() => setStep(0)}
                 className="text-xs font-medium text-zinc-500 transition hover:text-black"
               >
-                ← Back
+                {t('quiz.back')}
               </button>
               <button
                 type="button"
                 onClick={() => setStep(2)}
                 className="bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
               >
-                Continue →
+                {t('quiz.continue')}
               </button>
             </div>
           </div>
@@ -201,8 +203,8 @@ export default function QuizRecommender({ onPick }) {
         {/* Step 2: 类别 */}
         {step === 2 && (
           <div>
-            <h3 className="mb-1 text-base font-bold text-zinc-900">Pick genres</h3>
-            <p className="mb-4 text-xs text-zinc-500">Optional — leave empty for any</p>
+            <h3 className="mb-1 text-base font-bold text-zinc-900">{t('quiz.genres')}</h3>
+            <p className="mb-4 text-xs text-zinc-500">{t('quiz.genresOptional')}</p>
             <div className="flex flex-wrap gap-2">
               {genreList.map((g) => (
                 <Chip
@@ -220,7 +222,7 @@ export default function QuizRecommender({ onPick }) {
                 onClick={() => setStep(1)}
                 className="text-xs font-medium text-zinc-500 transition hover:text-black"
               >
-                ← Back
+                {t('quiz.back')}
               </button>
               <button
                 type="button"
@@ -228,7 +230,7 @@ export default function QuizRecommender({ onPick }) {
                 disabled={loading}
                 className="bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:opacity-50"
               >
-                {loading ? 'Picking…' : 'Surprise Me'}
+                {loading ? t('quiz.picking') : t('quiz.surpriseMe')}
               </button>
             </div>
           </div>
@@ -249,7 +251,7 @@ export default function QuizRecommender({ onPick }) {
               </div>
               <div className="min-w-0 w-full flex-1 text-center sm:text-left">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
-                  {result.kind === 'tv' ? 'TV Show' : 'Movie'}
+                  {result.kind === 'tv' ? t('quiz.tvShow') : t('quiz.movie')}
                   {decade !== 'any' && ` · ${decade}`}
                 </p>
                 <h3 className="mt-1 text-xl font-extrabold leading-tight text-zinc-900">
@@ -279,7 +281,7 @@ export default function QuizRecommender({ onPick }) {
                       }
                       className="flex-1 bg-black px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-zinc-800 sm:flex-none"
                     >
-                      View Details
+                      {t('quiz.viewDetails')}
                     </button>
                   )}
                   <button
@@ -288,14 +290,14 @@ export default function QuizRecommender({ onPick }) {
                     disabled={loading}
                     className="flex-1 border border-zinc-300 px-4 py-2.5 text-xs font-semibold text-zinc-700 transition hover:border-zinc-500 hover:bg-zinc-50 disabled:opacity-50 sm:flex-none"
                   >
-                    {loading ? 'Picking…' : 'Reroll'}
+                    {loading ? t('quiz.picking') : t('quiz.reroll')}
                   </button>
                   <button
                     type="button"
                     onClick={reset}
                     className="flex-1 border border-zinc-300 px-4 py-2.5 text-xs font-semibold text-zinc-700 transition hover:border-zinc-500 hover:bg-zinc-50 sm:flex-none"
                   >
-                    Start Over
+                    {t('quiz.startOver')}
                   </button>
                 </div>
               </div>
@@ -311,7 +313,7 @@ export default function QuizRecommender({ onPick }) {
               onClick={reset}
               className="ml-3 font-medium text-zinc-700 underline hover:text-black"
             >
-              Try again
+              {t('quiz.tryAgain')}
             </button>
           </div>
         )}
