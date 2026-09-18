@@ -13,6 +13,24 @@ export function safeGet(key) {
   }
 }
 
+// 最近一次 store 通知的来源：
+//   'local'    —— 本页调用了 write()，即用户操作
+//   'external' —— storage 事件触发的重读，即存储被本页以外的东西改写了
+//               （清站点数据、别的标签页清空、浏览器策略把存储抹掉）
+//
+// 同步层的录制器必须区分这两者：条目「消失」在用户手里是删除，在外部改写里是
+// 本地缓存被清空。两者都记成删除，用户清一次站点数据就会把云端整库删掉。
+// 见 sync/merge.js 的 recordChanges。
+let changeOrigin = 'local'
+
+export function setChangeOrigin(origin) {
+  changeOrigin = origin
+}
+
+export function getChangeOrigin() {
+  return changeOrigin
+}
+
 export function safeSet(key, value) {
   try {
     localStorage.setItem(key, value)

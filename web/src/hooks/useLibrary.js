@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback } from 'react'
-import { safeGetJSON, safeSet } from '../storage'
+import { safeGetJSON, safeSet, setChangeOrigin } from '../storage'
 
 const STORAGE_KEY = 'lumenframe:library'
 const NOTES_KEY = 'lumenframe:notes'
@@ -55,9 +55,12 @@ function notify() {
 }
 
 // 从存储重读（storage 事件：其它标签页写入后同步）
+// 标记来源为 external：这次变化不是用户操作，可能是存储被清空（key === null）——
+// 同步层据此判断「条目消失」是缓存被清还是用户删除，绝不在这里记墓碑。
 function emit() {
   cache = readStore()
   notesCache = readNotes()
+  setChangeOrigin('external')
   notify()
 }
 
@@ -82,6 +85,7 @@ function write(next) {
   // 先落内存缓存，再尝试持久化：存储不可用时改动仍在本会话有效
   cache = next
   safeSet(STORAGE_KEY, JSON.stringify(next))
+  setChangeOrigin('local')
   notify()
 }
 
@@ -237,6 +241,7 @@ export function useLibrary() {
         ),
       })
     }
+    setChangeOrigin('local')
     notify()
   }, [cache])
 

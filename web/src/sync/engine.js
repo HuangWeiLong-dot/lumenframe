@@ -5,10 +5,11 @@ import {
 } from '../hooks/useLibrary'
 import { subscribePinned, getPinnedState, applyRemotePinned } from '../hooks/usePinned'
 import { subscribeAuth, getAuthState } from '../auth/store'
-import { safeGetJSON, safeSet, safeSetJSON } from '../storage'
+import { safeGetJSON, safeSet, safeSetJSON, getChangeOrigin } from '../storage'
 import { project, toLocal, toRows, fromRows, canon } from './projection.js'
 import {
   buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
+  recordChanges, persistableMeta,
 } from './merge.js'
 
 const META_KEY = 'lumenframe:sync:meta'
@@ -73,8 +74,24 @@ function persistMeta() {
   if (persistTimer) return
   persistTimer = setTimeout(() => {
     persistTimer = null
-    safeSetJSON(META_KEY, meta)
+    persistMetaNow()
   }, 400)
+}
+
+function persistMetaNow() {
+  // 与磁盘上的副本逐键合并后再写：别的标签页可能刚记了更新的时间戳或墓碑，
+  // 整对象覆盖会把它抹掉，于是 A 标签页删掉的条目被 B 的陈旧 meta 复活。
+  meta = persistableMeta(loadMeta(), meta)
+  safeSetJSON(META_KEY, meta)
+}
+
+// meta 存在 localStorage 里，是跨标签页共享的**同一份**；但内存里的副本各页一份，
+// 只有本页自己记录时才更新。而 ensureLeader 只让一个标签页负责同步——本页可能正是那个
+// 标签页，却拿着不含对方墓碑的陈旧副本去合并，把对方刚删掉的条目当成「远端还有」而复活。
+// 所以每轮同步前先与磁盘合并一次（不做覆盖：本页可能有还在 400ms 防抖里的记录）。
+function syncMetaFromDisk() {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null }
+  persistMetaNow()
 }
 
 // 评分标量缓存与 watched[].myRating 是两份数据（详情页历史上读标量）。
@@ -91,6 +108,10 @@ function mirrorRatings(watched) {
 // 登录与否都在跑。这不只是省事：首次登录时要判断「谁更新」，
 // 登录那一刻才建时间戳就毫无意义了（全都等于 now）。
 // 每次变化只做一次投影 diff，几百条的量级可以忽略。
+//
+// 关键约束：只有**本页用户操作**（store 的 write()）造成的消失才算删除。
+// storage 事件触发的重读（别的标签页写入、清站点数据）是「本地缓存被外部改写」，
+// 记成删除就等于把用户的清缓存动作变成整库删除并推上云端 —— 见 merge.recordChanges。
 
 function record() {
   if (applyingRemote) return
@@ -101,23 +122,22 @@ function record() {
     return
   }
 
-  const now = Date.now()
-  let changed = false
-  const keys = new Set([...Object.keys(prevProjection), ...Object.keys(next)])
-  for (const key of keys) {
-    const a = prevProjection[key]
-    const b = next[key]
-    if (b === undefined) {
-      if (a !== undefined) { meta.meta[key] = { ts: now, deleted: true }; changed = true }
-    } else if (a === undefined) {
-      meta.meta[key] = { ts: now }; changed = true      // 新增（或删除后重新加回，顺带清掉墓碑）
-    } else if (canon(a) !== canon(b)) {
-      meta.meta[key] = { ts: now }; changed = true
-    }
-  }
+  const external = getChangeOrigin() === 'external'
+  const { patch, vanished } = recordChanges(prevProjection, next, Date.now(), external)
   prevProjection = next
-  if (changed) {
+
+  if (Object.keys(patch).length) {
+    Object.assign(meta.meta, patch)
     persistMeta()
+    scheduleSync()
+  } else if (external && vanished) {
+    // 条目被本页以外的东西弄消失了（清站点数据、别的标签页 clear()、别的标签页删了条目）：
+    // 一条墓碑都不记，改为拉一轮。两种情形都靠这一轮收敛——
+    //   · 缓存被清空：拉到的是云端整库，落回本地 = 「清缓存 = 从云端完整恢复」；
+    //   · 别的标签页删了条目：对方记的墓碑会随 syncMetaFromDisk 一起进来，
+    //     本页据此把它推上云端（对方若不是 leader，它自己根本推不上去）。
+    // 这里不必 persistMeta：没有墓碑要记，而 meta 里那些「活着但投影里没有」的键
+    // 本来就会被 buildLocalState 当作不存在；下一轮同步结束时还会整体写回一次。
     scheduleSync()
   }
 }
@@ -192,6 +212,10 @@ async function syncNow() {
     const rows = await pull(supabase, user.id)
     lastPullAt = Date.now()
     const remote = fromRows(rows)
+
+    // 拉取期间别的标签页可能记了墓碑。先把磁盘上的 meta 合并回来再算合并结果，
+    // 否则对方刚删掉的条目会被本页用「远端还有」的结论复活（见 syncMetaFromDisk）。
+    syncMetaFromDisk()
 
     // ★ 所有本地快照都必须在 await **之后**重新取。
     // 网络往返期间用户完全可能又改了本地数据；拿 await 之前的快照算合并结果再整体写回，
