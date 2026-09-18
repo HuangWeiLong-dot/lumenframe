@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { acquireSlot } from '../imageQueue'
+import { tRaw as t } from '../i18n'
 
 // 通用图片组件：
 // - 全局并发限流，排队中显示骨架屏
@@ -11,7 +12,7 @@ const MAX_RETRIES = 2
 const RETRY_DELAYS = [400, 1200]
 const LOAD_TIMEOUT = 8000 // 8s 无响应则重试
 
-export default function SmartImage({
+const SmartImage = memo(function SmartImage({
   src,
   alt = '',
   className = '',
@@ -141,7 +142,7 @@ export default function SmartImage({
         className={`flex items-center justify-center bg-zinc-100 text-[10px] uppercase tracking-wider text-zinc-400 ${onClick ? 'cursor-pointer' : ''} ${className}`}
         style={aspect ? { aspectRatio: aspect } : undefined}
       >
-        No poster
+        {t('common.noPoster')}
       </div>
     )
   }
@@ -197,4 +198,6 @@ export default function SmartImage({
       )}
     </div>
   )
-}
+})
+
+export default SmartImage

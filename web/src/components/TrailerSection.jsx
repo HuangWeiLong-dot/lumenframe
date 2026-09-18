@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import { apiUrl, FILMGRAB_BASE } from '../api'
+import { useI18n } from '../i18n'
 
 // 39967 -> "39.9K"，1250000 -> "1.25M"
 function compact(n) {
@@ -21,6 +22,7 @@ function formatDate(iso) {
 }
 
 function CommentItem({ c }) {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const [avatarOk, setAvatarOk] = useState(true)
   const long = c.text.length > 280 || c.text.split('\n').length > 5
@@ -67,7 +69,7 @@ function CommentItem({ c }) {
               onClick={() => setExpanded((v) => !v)}
               className="text-xs font-medium text-zinc-900 underline-offset-2 hover:underline"
             >
-              {expanded ? 'Show less' : 'Show more'}
+              {expanded ? t('trailer.showLess') : t('trailer.showMore')}
             </button>
           )}
         </div>
@@ -77,6 +79,7 @@ function CommentItem({ c }) {
 }
 
 export default function TrailerSection({ movie }) {
+  const { t } = useI18n()
   const tmdbId = movie?.id
   const isTv = movie?.kind === 'tv'
   const title = movie?.title
@@ -147,18 +150,18 @@ export default function TrailerSection({ movie }) {
   // 预告片不可达或正常但无预告片：仍保留区块，提示状态
   if (status === 'error') {
     return (
-      <CollapsibleSection title="Trailer">
+      <CollapsibleSection title={t('trailer.title')}>
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Trailer service unavailable right now.
+          {t('trailer.error')}
         </div>
       </CollapsibleSection>
     )
   }
   if (status === 'done' && !trailer) {
     return (
-      <CollapsibleSection title="Trailer">
+      <CollapsibleSection title={t('trailer.title')}>
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          No trailer found for this title.
+          {t('trailer.notFound')}
         </div>
       </CollapsibleSection>
     )
@@ -171,15 +174,15 @@ export default function TrailerSection({ movie }) {
       rel="noreferrer"
       className="shrink-0 text-xs text-zinc-600 underline-offset-2 hover:underline"
     >
-      Open on YouTube
+      {t('trailer.openYouTube')}
     </a>
   )
 
   return (
-    <CollapsibleSection title="Trailer" defaultOpen action={headerAction}>
+    <CollapsibleSection title={t('trailer.title')} defaultOpen action={headerAction}>
       {status === 'loading' && (
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Loading trailer…
+          {t('trailer.loading')}
         </div>
       )}
 
@@ -198,7 +201,7 @@ export default function TrailerSection({ movie }) {
               <button
                 type="button"
                 onClick={() => setPlaying(true)}
-                aria-label="Play trailer"
+                aria-label={t('trailer.play')}
                 className="group absolute inset-0 flex items-center justify-center"
               >
                 <img
@@ -217,14 +220,14 @@ export default function TrailerSection({ movie }) {
           </div>
 
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-500">
-            {trailer.official && <span className="font-medium text-zinc-800">Official</span>}
+            {trailer.official && <span className="font-medium text-zinc-800">{t('trailer.official')}</span>}
             {trailer.publishedAt && <span>· {formatDate(trailer.publishedAt)}</span>}
           </div>
 
           {FILMGRAB_BASE !== '' && commentsStatus !== 'error' && comments.length > 0 && (
             <div className="mt-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.25em] text-zinc-700">
-                Top YouTube Comments
+                {t('trailer.topComments')}
               </h3>
               <div className="mt-2">
                 {comments.map((c, i) => <CommentItem key={`${c.author}-${i}`} c={c} />)}

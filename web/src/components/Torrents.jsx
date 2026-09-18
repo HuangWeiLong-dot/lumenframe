@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import Subtitles from './Subtitles'
 import { FILMGRAB_BASE } from '../api'
+import { useI18n } from '../i18n'
 
 // 走 FilmGrab FastAPI 的 /api/torrent/v1（本地经 Vite /filmgrab 代理，
 // 公网经 Nginx /filmgrab -> /api 重写）；未配置服务时显示未配置提示。
@@ -166,6 +167,7 @@ async function copyToClipboard(text) {
 }
 
 function TorrentRow({ row }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -221,8 +223,8 @@ function TorrentRow({ row }) {
           <button
             type="button"
             onClick={handleCopy}
-            title={copied ? 'Magnet link copied' : 'Copy magnet link'}
-            aria-label={copied ? 'Magnet link copied' : 'Copy magnet link'}
+            title={copied ? t('torrents.copied') : t('torrents.copyMagnet')}
+            aria-label={copied ? t('torrents.copied') : t('torrents.copyMagnet')}
             className={`flex h-8 w-8 items-center justify-center border transition ${
               copied
                 ? 'border-black bg-black text-white'
@@ -235,15 +237,15 @@ function TorrentRow({ row }) {
         {row.magnet ? (
           <a
             href={row.magnet}
-            title="Open magnet link"
-            aria-label="Open magnet link"
+            title={t('torrents.openMagnet')}
+            aria-label={t('torrents.openMagnet')}
             className="flex h-8 w-8 items-center justify-center border border-zinc-300 text-zinc-700 transition hover:border-black hover:bg-black hover:text-white"
           >
             <MagnetIcon className="h-4 w-4" />
           </a>
         ) : (
           <span
-            title="Magnet unavailable, open the detail page"
+            title={t('torrents.magnetUnavailable')}
             className="flex h-8 w-8 cursor-not-allowed items-center justify-center border border-zinc-200 text-zinc-300"
           >
             <MagnetIcon className="h-4 w-4" />
@@ -254,8 +256,8 @@ function TorrentRow({ row }) {
             href={row.url}
             target="_blank"
             rel="noreferrer"
-            title="Open source page"
-            aria-label="Open source page"
+            title={t('torrents.openSource')}
+            aria-label={t('torrents.openSource')}
             className="flex h-8 w-8 items-center justify-center border border-zinc-300 text-zinc-700 transition hover:border-black hover:bg-black hover:text-white"
           >
             <ExternalIcon className="h-4 w-4" />
@@ -267,7 +269,11 @@ function TorrentRow({ row }) {
 }
 
 export default function Torrents({ movie }) {
-  const title = movie?.title
+  const { t } = useI18n()
+  // 下载资源恒用英文原名检索：各站点索引的是英文发布名，中文界面下 movie.title 已是中文，
+  // 直接搜会命中不到资源。title_en 与界面语言无关，切换语言既不会重发请求也不会清空已加载的结果
+  // （剧集来自 TVmaze，本身即英文，无 title_en 字段时自然回退）
+  const title = movie?.title_en || movie?.title
   const year = movie?.year || ''
   const isTv = movie?.kind === 'tv'
   const [rows, setRows] = useState([])
@@ -330,18 +336,18 @@ export default function Torrents({ movie }) {
   // 未配置下载服务或全部站点都不可达：显示区块 + 提示
   if (!ENABLED) {
     return (
-      <CollapsibleSection title="Downloads">
+      <CollapsibleSection title={t('torrents.title')}>
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-          Downloads service is not configured.
+          {t('torrents.notConfigured')}
         </div>
       </CollapsibleSection>
     )
   }
   if (status === 'error') {
     return (
-      <CollapsibleSection title="Downloads">
+      <CollapsibleSection title={t('torrents.title')}>
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-          All torrent sources are currently unavailable.
+          {t('torrents.allUnavailable')}
         </div>
       </CollapsibleSection>
     )
@@ -354,21 +360,21 @@ export default function Torrents({ movie }) {
       disabled={status === 'loading'}
       className="shrink-0 text-xs text-zinc-600 underline-offset-2 hover:underline disabled:opacity-40"
     >
-      Refresh
+      {t('torrents.refresh')}
     </button>
   )
 
   return (
-    <CollapsibleSection title="Downloads" count={rows.length} action={headerAction}>
+    <CollapsibleSection title={t('torrents.title')} count={rows.length} action={headerAction}>
       {status === 'loading' && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-          Searching torrent sources…
+          {t('torrents.searching')}
         </div>
       )}
 
       {status === 'done' && rows.length === 0 && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
-          No torrents found for this title.
+          {t('torrents.noResults')}
         </div>
       )}
 
@@ -376,7 +382,7 @@ export default function Torrents({ movie }) {
         <>
           <div className="mb-3 flex flex-wrap gap-1.5">
             <FilterChip
-              label="All"
+              label={t('torrents.all')}
               count={siteCounts.all}
               active={filter === 'all'}
               onClick={() => setFilter('all')}
@@ -399,7 +405,7 @@ export default function Torrents({ movie }) {
           </div>
 
           <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
-            For educational purposes only. Do not distribute or disseminate.
+            {t('torrents.disclaimer')}
           </p>
         </>
       )}

@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react'
-import { posterFor } from '../api'
-import SmartImage from './SmartImage'
+import { useI18n } from '../i18n'
+import { isSupabaseConfigured } from '../supabase'
+import { useAuth, openModal } from '../auth/store'
+import { useSyncStatus } from '../sync/engine'
+import AuthModal from './AuthModal'
+
+// 同步状态圆点：灰=空闲、黑闪=同步中、红=失败
+function SyncDot({ state }) {
+  return (
+    <span
+      className={`inline-block h-[6px] w-[6px] shrink-0 ${
+        state === 'syncing' ? 'animate-pulse bg-black' : state === 'error' ? 'bg-red-500' : 'bg-zinc-300'
+      }`}
+    />
+  )
+}
 
 const REFERENCES = [
   { name: 'Film Art Gallery', url: 'https://filmartgallery.com' },
@@ -24,77 +38,25 @@ const API_SOURCES = [
   { name: 'ShotOnWhat?', url: 'https://shotonwhat.com' },
 ]
 
-function PinnedThumbnails({ pinned, onPickPinned, onUnpin, size = 'md' }) {
-  const h = size === 'sm' ? 'h-10 w-7' : 'h-12 w-8'
-  return (
-    <>
-      {pinned.map((p) => {
-        const src = posterFor(p, 'w92')
-        return (
-          <div key={`${p.kind}:${p.id}`} className="group relative shrink-0">
-            <button
-              onClick={() => onPickPinned?.(p)}
-              title={p.title}
-              className={`block ${h} overflow-hidden bg-zinc-100 transition hover:opacity-80`}
-            >
-              {src ? (
-                <SmartImage src={src} alt={p.title} className="h-full w-full" objectFit="cover" />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center text-[8px] text-zinc-400">
-                  No poster
-                </span>
-              )}
-            </button>
-            {/* 取消 pin */}
-            <button
-              onClick={(e) => { e.stopPropagation(); onUnpin?.(p) }}
-              aria-label="Unpin"
-              className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center bg-black/70 text-white opacity-0 transition group-hover:opacity-100"
-            >
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
-                <line x1="6" y1="6" x2="18" y2="18" />
-                <line x1="6" y1="18" x2="18" y2="6" />
-              </svg>
-            </button>
-          </div>
-        )
-      })}
-    </>
-  )
-}
-
-export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, onUnpin }) {
+export default function Header({ onHome, onLibrary }) {
   const [open, setOpen] = useState(false)
-  const [pinOpen, setPinOpen] = useState(false)
+  const { t, lang, setLang } = useI18n()
+  const auth = useAuth()
+  const sync = useSyncStatus()
 
   // 锁定背景滚动
   useEffect(() => {
-    document.body.style.overflow = (open || pinOpen) ? 'hidden' : ''
+    document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
-  }, [open, pinOpen])
-
-  const hasPins = pinned.length > 0
+  }, [open])
 
   return (
     <>
       <header
         className="fixed top-0 left-0 right-0 z-[1000] flex items-center justify-between bg-white/70 px-4 py-3 backdrop-blur-md backdrop-saturate-150 sm:px-6 sm:py-4"
-        style={{ fontFamily: "'Inter', Arial, sans-serif" }}
       >
-        {/* 左侧 Logo + 移动端 pin 按钮 */}
+        {/* 左侧 Logo（Pin 收藏栏已独立为左侧固定抽屉：components/PinnedDrawer.jsx） */}
         <div className="flex items-center gap-2">
-          {hasPins && (
-            <button
-              onClick={() => setPinOpen(true)}
-              aria-label="Pinned titles"
-              className="flex h-8 w-8 items-center justify-center text-black transition hover:opacity-60 sm:hidden"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 17v5" />
-                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
-              </svg>
-            </button>
-          )}
           <button
             onClick={onHome}
             className="text-base font-bold uppercase tracking-[0.12em] text-black transition hover:opacity-60 sm:text-lg sm:tracking-[0.15em]"
@@ -103,30 +65,35 @@ export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, o
           </button>
         </div>
 
-        {/* 已 Pin 的标题：自适应宽度 */}
-        {hasPins && (
-          <div className="ml-3 hidden items-center gap-1.5 sm:flex">
-            <PinnedThumbnails pinned={pinned} onPickPinned={onPickPinned} onUnpin={onUnpin} />
-          </div>
-        )}
-
         {/* 右侧：桌面 Library + References + 移动端汉堡 */}
         <div className="flex items-center gap-3">
           <button
             onClick={onLibrary}
             className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
           >
-            Library
+            {t('header.library')}
           </button>
+          {/* 账号：未配置 Supabase 时整块不渲染（同 Film Stills 区块的自隐藏约定） */}
+          {isSupabaseConfigured && (
+            <button
+              onClick={() => openModal('signin')}
+              className="hidden max-w-[11rem] items-center gap-2 text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:flex"
+            >
+              <span className="truncate">
+                {auth.user ? auth.username || auth.user.email.split('@')[0] : t('account.signIn')}
+              </span>
+              {auth.user && <SyncDot state={sync.state} />}
+            </button>
+          )}
           <button
             onClick={() => setOpen(true)}
             className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
           >
-            References
+            {t('header.references')}
           </button>
           <button
             onClick={() => setOpen(true)}
-            aria-label="Open menu"
+            aria-label={t('header.openMenu')}
             className="flex h-8 w-8 items-center justify-center text-black transition hover:opacity-60 sm:hidden"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -137,73 +104,6 @@ export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, o
           </button>
         </div>
       </header>
-
-      {/* 左侧 pin 滑块（移动端） */}
-      {hasPins && (
-        <>
-          <div
-            onClick={() => setPinOpen(false)}
-            className={`fixed inset-0 z-[1001] bg-black/30 transition-opacity duration-300 ${
-              pinOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
-            }`}
-          />
-          <aside
-            className={`fixed top-0 left-0 z-[1002] h-full w-72 max-w-[80vw] bg-white shadow-2xl transition-transform duration-300 ease-out ${
-              pinOpen ? 'translate-x-0' : '-translate-x-full'
-            }`}
-            style={{ fontFamily: "'Inter', Arial, sans-serif" }}
-          >
-            <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
-              <span className="text-xs uppercase tracking-[0.25em] text-zinc-500">Pinned</span>
-              <button
-                onClick={() => setPinOpen(false)}
-                aria-label="Close"
-                className="text-black transition hover:opacity-60"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex flex-col gap-2 overflow-y-auto p-4" style={{ maxHeight: 'calc(100vh - 65px)' }}>
-              {pinned.map((p) => {
-                const src = posterFor(p, 'w185')
-                return (
-                  <div key={`${p.kind}:${p.id}`} className="group relative flex items-center gap-3 border border-zinc-100 p-2 transition hover:bg-zinc-50">
-                    <button
-                      onClick={() => { setPinOpen(false); onPickPinned?.(p) }}
-                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                    >
-                      <div className="h-16 w-11 shrink-0 overflow-hidden bg-zinc-100">
-                        {src ? (
-                          <SmartImage src={src} alt={p.title} className="h-full w-full" objectFit="cover" />
-                        ) : (
-                          <span className="flex h-full w-full items-center justify-center text-[8px] text-zinc-400">No poster</span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-zinc-900">{p.title}</p>
-                        <p className="text-xs text-zinc-500">{p.year || p.yearRange || ''}</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onUnpin?.(p) }}
-                      aria-label="Unpin"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center text-zinc-400 transition hover:text-red-500"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                        <line x1="6" y1="18" x2="18" y2="6" />
-                      </svg>
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          </aside>
-        </>
-      )}
 
       {/* 右侧 References 滑块 */}
       <div
@@ -216,13 +116,12 @@ export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, o
         className={`fixed top-0 right-0 z-[1002] h-full w-80 max-w-[85vw] bg-white shadow-2xl transition-transform duration-300 ease-out ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
-        style={{ fontFamily: "'Inter', Arial, sans-serif" }}
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-200">
-          <span className="text-xs uppercase tracking-[0.25em] text-zinc-500">References</span>
+          <span className="text-xs uppercase tracking-[0.25em] text-zinc-500">{t('header.references')}</span>
           <button
             onClick={() => setOpen(false)}
-            aria-label="Close"
+            aria-label={t('header.close')}
             className="text-black transition hover:opacity-60"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -232,17 +131,55 @@ export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, o
           </button>
         </div>
         <nav className="flex flex-col overflow-y-auto px-2 py-3" style={{ maxHeight: 'calc(100vh - 65px)' }}>
+          {/* 账号：< sm 时顶栏按钮隐藏，改从这里进 */}
+          {isSupabaseConfigured && (
+            <button
+              onClick={() => { setOpen(false); openModal('signin') }}
+              className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">
+                  {auth.user ? auth.username || auth.user.email : t('account.signIn')}
+                </span>
+                {auth.user && <SyncDot state={sync.state} />}
+              </span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+                <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+              </svg>
+            </button>
+          )}
           <button
             onClick={() => { setOpen(false); onLibrary?.() }}
             className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"
           >
-            <span>My Library</span>
+            <span>{t('header.myLibrary')}</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
               <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
             </svg>
           </button>
+          {/* 语言切换：< sm 时右下角悬浮按钮已隐藏，改从滑块里切换 */}
+          <div className="flex items-center justify-between px-4 py-3 text-sm text-black">
+            <span>{t('header.language')}</span>
+            <div className="flex items-center gap-1">
+              {['en', 'zh'].map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setLang(code)}
+                  aria-pressed={lang === code}
+                  className={`flex h-8 min-w-[44px] items-center justify-center border px-2 text-[11px] font-semibold uppercase tracking-[0.15em] transition ${
+                    lang === code
+                      ? 'border-black bg-black text-white'
+                      : 'border-zinc-300 text-zinc-600 hover:border-zinc-500 hover:text-black'
+                  }`}
+                >
+                  {code === 'en' ? t('lang.en') : t('lang.zh')}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mx-4 my-1 border-t border-zinc-100" />
-          <span className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.2em] text-zinc-400">API & Data Sources</span>
+          <span className="px-4 pt-3 pb-1 text-[10px] uppercase tracking-[0.2em] text-zinc-400">{t('header.apiSources')}</span>
           {API_SOURCES.map((r) => (
             <a
               key={r.url}
@@ -293,6 +230,18 @@ export default function Header({ onHome, onLibrary, pinned = [], onPickPinned, o
           />
         </div>
       </aside>
+
+      {/* 语言切换：≥ sm 用右下角悬浮按钮；< sm 收进右侧滑块里（见上方 nav 的 Language 行） */}
+      <button
+        onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
+        aria-label={t('header.switchLang')}
+        className="fixed bottom-5 right-5 z-[1000] hidden h-10 w-10 items-center justify-center border border-zinc-300 bg-white/80 text-xs font-semibold uppercase tracking-wider text-zinc-700 shadow-lg backdrop-blur-md transition hover:bg-white hover:text-black sm:flex"
+      >
+        {lang === 'en' ? t('lang.zh') : t('lang.en')}
+      </button>
+
+      {/* 账号弹窗放在触发按钮所在的组件里，两者不会各自漂移 */}
+      <AuthModal />
     </>
   )
 }

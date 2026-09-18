@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import { FILMGRAB_BASE, downloadImage } from '../api'
+import { useI18n } from '../i18n'
 
 // 开发态默认走 Vite 的 /filmgrab 代理；公网构建只有配置了 VITE_FILMGRAB_BASE 才启用
 // （FilmGrab 不接受爬取，请仅在自有/可信服务器上开启）
@@ -11,6 +12,7 @@ const listUrl = (qs) => `${FILMGRAB_BASE}/screenshots?${qs}`
 const rewrite = (u) => u.replace(/^\/api/, FILMGRAB_BASE)
 
 export default function FilmGrabShots({ movie, selected, onSelect }) {
+  const { t } = useI18n()
   const title = movie?.title
   const year = movie?.year || ''
   const [shots, setShots] = useState([])
@@ -61,18 +63,18 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
   // 未配置剧照服务或服务异常：显示区块 + 提示，而不是静默消失
   if (!ENABLED) {
     return (
-      <CollapsibleSection title="Film Stills">
+      <CollapsibleSection title={t('filmGrab.title')}>
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Film Stills service is not configured.
+          {t('filmGrab.notConfigured')}
         </div>
       </CollapsibleSection>
     )
   }
   if (status === 'error') {
     return (
-      <CollapsibleSection title="Film Stills">
+      <CollapsibleSection title={t('filmGrab.title')}>
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Film Stills service unavailable right now.
+          {t('filmGrab.error')}
         </div>
       </CollapsibleSection>
     )
@@ -85,28 +87,28 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
       rel="noreferrer"
       className="shrink-0 text-xs text-zinc-600 underline-offset-2 hover:underline"
     >
-      via FilmGrab
+      {t('filmGrab.via')}
     </a>
   )
 
   return (
     <>
-    <CollapsibleSection title="Film Stills" count={shots.length} action={headerAction}>
+    <CollapsibleSection title={t('filmGrab.title')} count={shots.length} action={headerAction}>
       {status === 'loading' && (
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Fetching stills…
+          {t('filmGrab.fetching')}
         </div>
       )}
 
       {status === 'done' && shots.length === 0 && (
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          No film stills available for this movie.
+          {t('filmGrab.emptyMovie')}
         </div>
       )}
 
       {status === 'done' && shots.length > 0 && (
         <>
-          <p className="mb-3 text-xs text-zinc-700">Tap a still to use it on your generated card.</p>
+          <p className="mb-3 text-xs text-zinc-700">{t('filmGrab.tapForCard')}</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
             {shots.map((src, i) => {
               const isSelected = selected === src
@@ -121,7 +123,7 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
                     type="button"
                     onClick={() => onSelect(isSelected ? null : src)}
                     className="absolute inset-0 h-full w-full"
-                    aria-label={isSelected ? 'Remove still from card' : 'Use this still on card'}
+                    aria-label={isSelected ? t('filmGrab.removeFromCard') : t('filmGrab.useOnCard')}
                   >
                     <img
                       src={src}
@@ -138,7 +140,7 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setActive(src) }}
-                    aria-label="Preview still"
+                    aria-label={t('filmGrab.preview')}
                     className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -151,7 +153,7 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
 
                   {isSelected && (
                     <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                      On card
+                      {t('common.onCard')}
                     </span>
                   )}
                 </div>
@@ -176,7 +178,7 @@ export default function FilmGrabShots({ movie, selected, onSelect }) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); downloadImage(active, `${title} - still.jpg`) }}
-            aria-label="Download still"
+            aria-label={t('filmGrab.download')}
             className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

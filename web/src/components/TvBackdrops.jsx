@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import { apiUrl, downloadImage } from '../api'
+import { useI18n } from '../i18n'
 
 // 剧集无原生 backdrop，用分集缩略图（16:9）作为 backdrops 来源。
 // 数据走 /api/tv/:id/episodes（30 分钟缓存），与 ShowEpisodes 共享后端缓存。
 export default function TvBackdrops({ show, selected, onSelect }) {
+  const { t } = useI18n()
   const id = show?.id
   const title = show?.title
   const [shots, setShots] = useState([])
@@ -56,9 +58,9 @@ export default function TvBackdrops({ show, selected, onSelect }) {
 
   if (status === 'error') {
     return (
-      <CollapsibleSection title="Backdrops">
+      <CollapsibleSection title={t('tvBackdrops.title')}>
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Backdrops unavailable right now.
+          {t('tvBackdrops.error')}
         </div>
       </CollapsibleSection>
     )
@@ -66,22 +68,22 @@ export default function TvBackdrops({ show, selected, onSelect }) {
 
   return (
     <>
-    <CollapsibleSection title="Backdrops" count={shots.length}>
+    <CollapsibleSection title={t('tvBackdrops.title')} count={shots.length}>
       {status === 'loading' && (
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          Loading backdrops…
+          {t('tvBackdrops.loading')}
         </div>
       )}
 
       {status === 'done' && shots.length === 0 && (
         <div className="border border-dashed border-zinc-300 py-10 text-center text-sm text-zinc-600">
-          No backdrops available for this show.
+          {t('tvBackdrops.empty')}
         </div>
       )}
 
       {status === 'done' && shots.length > 0 && (
         <>
-          <p className="mb-3 text-xs text-zinc-700">Tap a backdrop to use it on your generated card.</p>
+          <p className="mb-3 text-xs text-zinc-700">{t('tvBackdrops.tapForCard')}</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
             {shots.map((src, i) => {
               const isSelected = selected === src
@@ -96,7 +98,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
                     type="button"
                     onClick={() => onSelect(isSelected ? null : src)}
                     className="absolute inset-0 h-full w-full"
-                    aria-label={isSelected ? 'Remove backdrop from card' : 'Use this backdrop on card'}
+                    aria-label={isSelected ? t('tvBackdrops.removeFromCard') : t('tvBackdrops.useOnCard')}
                   >
                     <img
                       src={src}
@@ -112,7 +114,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setActive(src) }}
-                    aria-label="Preview backdrop"
+                    aria-label={t('tvBackdrops.preview')}
                     className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -125,7 +127,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
 
                   {isSelected && (
                     <span className="absolute bottom-2 left-2 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">
-                      On card
+                      {t('common.onCard')}
                     </span>
                   )}
                 </div>
@@ -150,7 +152,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); downloadImage(active, `${title} - backdrop.jpg`) }}
-            aria-label="Download backdrop"
+            aria-label={t('tvBackdrops.download')}
             className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
           >
             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

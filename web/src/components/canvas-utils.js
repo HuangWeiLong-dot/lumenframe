@@ -27,34 +27,75 @@ function strokeRoundRect(ctx, x, y, w, h, r, stroke, lineWidth = 1) {
   ctx.stroke()
 }
 
+// CJK 字符（含假名、谚文、全角标点）：可逐字断行。
+// 中文没有空格，若按 \s+ 切词，一整句会变成「一个词」而永不换行 ——
+// 中文标题/简介因此整行画出去，冲出海报边界。所以 CJK 必须逐字成词。
+const CJK_RE = /[\u1100-\u11FF\u2E80-\u303F\u3040-\u30FF\u3130-\u318F\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7FF\uF900-\uFAFF\uFE10-\uFE1F\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]/
+
+// 中文禁则：这些标点不能出现在行首，换行时连带前一个字符一起下移
+const NO_LINE_START = new Set('、。，．！？；：）〕］｝〉》」』】〗〞’”…—～·')
+
+// 切成断行单元：拉丁文按空格分词（保持原有断词行为），CJK 逐字可断
+function tokenizeForWrap(text) {
+  const tokens = []
+  let buf = ''
+  for (const ch of String(text)) {
+    if (CJK_RE.test(ch)) {
+      if (buf) { tokens.push(buf); buf = '' }
+      tokens.push(ch)
+    } else if (/\s/.test(ch)) {
+      if (buf) { tokens.push(buf); buf = '' }
+      tokens.push(' ')
+    } else {
+      buf += ch
+    }
+  }
+  if (buf) tokens.push(buf)
+  return tokens
+}
+
+// 贪心断行，返回 { lines, truncated }；truncated 表示确有内容被丢掉
+function breakLines(ctx, text, maxWidth, maxLines) {
+  const tokens = tokenizeForWrap(text)
+  const lines = []
+  let cur = []
+  let curW = 0
+  for (let i = 0; i < tokens.length; i++) {
+    const tk = tokens[i]
+    if (tk === ' ' && cur.length === 0) continue // 行首不留空格
+    const w = ctx.measureText(tk).width
+    if (cur.length && curW + w > maxWidth) {
+      // 禁则：标点不落行首 —— 把上一行末字一起挪到下一行（只会让行更短，不会溢出）
+      const carry = NO_LINE_START.has(tk) && cur.length > 1 ? [cur.pop()] : []
+      lines.push(cur.join('').trimEnd()) // 断点处的行尾空格不参与排版
+      if (maxLines && lines.length >= maxLines) {
+        const dropped = (tk === ' ' ? '' : tk) + tokens.slice(i + 1).join('')
+        return { lines, truncated: dropped.trim().length > 0 }
+      }
+      cur = carry
+      curW = carry.length ? ctx.measureText(carry.join('')).width : 0
+      if (tk === ' ' && cur.length === 0) continue
+    }
+    cur.push(tk)
+    curW += w
+  }
+  if (cur.length) lines.push(cur.join(''))
+  return { lines, truncated: false }
+}
+
 // 文字换行，返回 { lines: string[], height: number }
 // maxLines = 0 表示不限制行数
 export function wrapText(ctx, text, maxWidth, fontSize, lineHeight = 1.25, maxLines = 0, ellipsis = true) {
-  const words = String(text).split(/\s+/)
-  const lines = []
-  let line = ''
-  for (const word of words) {
-    const test = line ? line + ' ' + word : word
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line)
-      line = word
-      if (maxLines && lines.length >= maxLines) break
-    } else {
-      line = test
-    }
-  }
-  if (!maxLines || lines.length < maxLines) {
-    if (line) lines.push(line)
-  }
-  // 最后一行截断：加省略号或直接截断
-  if (maxLines && lines.length === maxLines) {
-    let last = lines[maxLines - 1]
+  const { lines, truncated } = breakLines(ctx, text, maxWidth, maxLines)
+  // 只在真的截掉内容时收尾：把最后一行收进 maxWidth，必要时补省略号
+  if (truncated && lines.length) {
     const suffix = ellipsis ? '…' : ''
     const targetWidth = maxWidth - (ellipsis ? ctx.measureText('…').width : 0)
+    let last = lines[lines.length - 1]
     while (last && ctx.measureText(last).width > targetWidth) {
       last = last.slice(0, -1)
     }
-    lines[maxLines - 1] = last + suffix
+    lines[lines.length - 1] = last + suffix
   }
   const lh = fontSize * lineHeight
   return { lines, height: lines.length * lh, lineHeight: lh }

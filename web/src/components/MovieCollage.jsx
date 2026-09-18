@@ -1,6 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTrending } from '../hooks/useTrending'
 import { posterUrl } from '../api'
+import StatusBadge from './StatusBadge'
+import { useI18n } from '../i18n'
 
 const GAP = 8
 
@@ -63,6 +65,7 @@ function pack(movies, cols, chunks) {
 }
 
 export default function MovieCollage({ onPick }) {
+  const { t } = useI18n()
   const trending = useTrending()
   const wrapRef = useRef(null)
   const [cols, setCols] = useState(3)
@@ -114,7 +117,7 @@ export default function MovieCollage({ onPick }) {
     <div className="mt-12 pb-1" ref={wrapRef}>
       {items.length > 0 && (
         <div className="mx-auto" style={{ width: totalW }}>
-          <p className="mb-4 text-xs uppercase tracking-[0.3em] text-zinc-700">Trending Now</p>
+          <p className="mb-4 text-xs uppercase tracking-[0.3em] text-zinc-700">{t('collage.title')}</p>
           <div
             className="grid"
             style={{
@@ -144,6 +147,7 @@ export default function MovieCollage({ onPick }) {
                   crossOrigin="anonymous"
                   className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105"
                 />
+                <StatusBadge kind={m.kind || 'movie'} id={m.id} size="md" />
                 {/* 悬浮片名条 */}
                 <span
                   className="pointer-events-none absolute inset-x-0 bottom-0 p-2 pt-8 text-xs font-medium leading-tight text-white opacity-0 transition duration-200 group-hover:opacity-100"

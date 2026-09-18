@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import SmartImage from './SmartImage'
-import { apiUrl, posterFor } from '../api'
+import StatusBadge from './StatusBadge'
+import { apiUrlWithLang, posterFor } from '../api'
+import { useI18n } from '../i18n'
 
 // 同类推荐：电影走 TasteDive(type=movie)+TMDB 解析，剧集走 TasteDive(type=show)+TVmaze 解析
 export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
+  const { t, apiLang } = useI18n()
   const id = movie?.id
   const kind = movie?.kind === 'tv' ? 'tv' : 'movie'
   const title = movie?.title
+  // 后端用 TasteDive（英文片名）匹配：中文界面下传 title_en
+  const matchTitle = movie?.title_en || title
   const year = movie?.year
   const [status, setStatus] = useState('loading')
   const [items, setItems] = useState([])
@@ -19,10 +24,10 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
     setItems([])
 
     const timer = setTimeout(() => {
-      const q = new URLSearchParams({ title, year: year || '' })
+      const q = new URLSearchParams({ title: matchTitle, year: year || '' })
       const endpoint =
         kind === 'tv' ? `/api/similar/tv/${id}?${q}` : `/api/similar/${id}?${q}`
-      fetch(apiUrl(endpoint))
+      fetch(apiUrlWithLang(endpoint))
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           return r.json()
@@ -39,21 +44,22 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
       alive = false
       clearTimeout(timer)
     }
-  }, [id, kind, title, year])
+    // apiLang：切换语言后同类推荐也跟着本地化
+  }, [id, kind, title, matchTitle, year, apiLang])
 
   if (status === 'error') {
     const body = (
       <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-        Recommendations unavailable right now.
+        {t('tasteDive.unavailable')}
       </div>
     )
     return embed ? (
       <section>
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">More Like This</h3>
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">{t('tasteDive.title')}</h3>
         {body}
       </section>
     ) : (
-      <CollapsibleSection title="More Like This">{body}</CollapsibleSection>
+      <CollapsibleSection title={t('tasteDive.title')}>{body}</CollapsibleSection>
     )
   }
 
@@ -61,13 +67,13 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
     <>
       {status === 'loading' && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-600">
-          Finding similar titles…
+          {t('tasteDive.loading')}
         </div>
       )}
 
       {status === 'done' && items.length === 0 && (
         <div className="border border-dashed border-zinc-300 py-8 text-center text-sm text-zinc-500">
-          No similar titles found.
+          {t('tasteDive.empty')}
         </div>
       )}
 
@@ -89,12 +95,13 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
                   className="group text-left"
                   title={m.title}
                 >
-                <div className="aspect-[2/3] w-full overflow-hidden bg-zinc-100">
+                <div className="relative aspect-[2/3] w-full overflow-hidden bg-zinc-100">
                   <SmartImage
                     src={poster}
                     alt={m.title}
                     className="h-full w-full"
                   />
+                  <StatusBadge kind={itemKind} id={itemId} size="md" />
                 </div>
                   <p className="mt-1 truncate text-xs font-medium text-zinc-800 group-hover:text-black">
                     {m.title}
@@ -105,7 +112,7 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
             })}
           </div>
           <p className="mt-3 text-[11px] text-zinc-400">
-            Recommendations by genre · posters by {kind === 'tv' ? 'TVmaze' : 'TMDB'}
+            {t('tasteDive.attribution', { source: kind === 'tv' ? 'TVmaze' : 'TMDB' })}
           </p>
         </>
       )}
@@ -114,11 +121,11 @@ export default function TasteDiveSimilar({ movie, onSelect, embed = false }) {
 
   return embed ? (
     <section>
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">More Like This</h3>
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-zinc-600">{t('tasteDive.title')}</h3>
       {body}
     </section>
   ) : (
-    <CollapsibleSection title="More Like This" count={items.length} defaultOpen>
+    <CollapsibleSection title={t('tasteDive.title')} count={items.length} defaultOpen>
       {body}
     </CollapsibleSection>
   )

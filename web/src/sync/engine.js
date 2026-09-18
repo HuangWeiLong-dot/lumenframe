@@ -1,0 +1,311 @@
+import { useSyncExternalStore } from 'react'
+import { getSupabase, isSupabaseConfigured } from '../supabase'
+import {
+  subscribeLibrary, getLibraryState, applyRemoteLibrary, applyRemoteNotes, ratingStorageKey,
+} from '../hooks/useLibrary'
+import { subscribePinned, getPinnedState, applyRemotePinned } from '../hooks/usePinned'
+import { subscribeAuth, getAuthState } from '../auth/store'
+import { safeGetJSON, safeSet, safeSetJSON } from '../storage'
+import { project, toLocal, toRows, fromRows, canon } from './projection.js'
+import {
+  buildLocalState, mergeStates, computeDirty, applyMetaWriteBack, scopeTransition,
+} from './merge.js'
+
+const META_KEY = 'lumenframe:sync:meta'
+const DEBOUNCE_MS = 1500
+const PAGE = 1000          // PostgREST 单次返回上限；不分页会静默截断大库
+const PUSH_BATCH = 200
+const FOCUS_PULL_MS = 60 * 1000
+
+// 同步元数据：每个条目的本地修改时间；带 deleted 的即墓碑（本地状态的真值）。
+// scope 记住这份数据属于哪个账号：换账号必须整体丢弃，
+// 否则 A 的墓碑会参与 B 的合并，把 B 的条目删掉。
+//
+// 这里刻意**不**维护「已推送」集合：每轮同步都整库拉取，远端状态就是答案，
+// 再存一份 pushed 只会多一个可能与现实不一致的副本。
+let meta = { scope: null, meta: {} }
+let prevProjection = null
+let applyingRemote = false
+
+let running = false
+let pendingSync = false
+let lastPullAt = 0
+
+// ---- 状态 store（供 UI 订阅）----
+
+let statusState = { state: 'off', lastSyncedAt: null, error: null }
+const statusListeners = new Set()
+
+function setStatus(patch) {
+  statusState = { ...statusState, ...patch }
+  statusListeners.forEach((fn) => fn())
+}
+
+export function subscribeSyncStatus(fn) {
+  statusListeners.add(fn)
+  return () => statusListeners.delete(fn)
+}
+
+export function getSyncStatus() {
+  return statusState
+}
+
+export function useSyncStatus() {
+  useSyncExternalStore(subscribeSyncStatus, getSyncStatus, getSyncStatus)
+  return statusState
+}
+
+// ---- 本地状态读取 ----
+
+function currentLocal() {
+  const { library, notes } = getLibraryState()
+  return { library, notes, pinned: getPinnedState() }
+}
+
+function loadMeta() {
+  const raw = safeGetJSON(META_KEY, null)
+  if (raw && typeof raw === 'object' && raw.meta) return { scope: raw.scope ?? null, meta: raw.meta }
+  return { scope: null, meta: {} }
+}
+
+let persistTimer = null
+function persistMeta() {
+  if (persistTimer) return
+  persistTimer = setTimeout(() => {
+    persistTimer = null
+    safeSetJSON(META_KEY, meta)
+  }, 400)
+}
+
+// 评分标量缓存与 watched[].myRating 是两份数据（详情页历史上读标量）。
+// 远端合并改了 watched 之后必须同步刷新标量，否则详情页仍显示旧分。
+function mirrorRatings(watched) {
+  for (const m of Array.isArray(watched) ? watched : []) {
+    if (m == null || m.id == null || !m.myRating) continue
+    safeSet(ratingStorageKey(m.kind || 'movie', m.id), String(m.myRating))
+  }
+}
+
+// ---- Recorder：把本地变化记成时间戳/墓碑 ----
+//
+// 登录与否都在跑。这不只是省事：首次登录时要判断「谁更新」，
+// 登录那一刻才建时间戳就毫无意义了（全都等于 now）。
+// 每次变化只做一次投影 diff，几百条的量级可以忽略。
+
+function record() {
+  if (applyingRemote) return
+  const next = project(currentLocal())
+
+  if (prevProjection === null) {
+    prevProjection = next
+    return
+  }
+
+  const now = Date.now()
+  let changed = false
+  const keys = new Set([...Object.keys(prevProjection), ...Object.keys(next)])
+  for (const key of keys) {
+    const a = prevProjection[key]
+    const b = next[key]
+    if (b === undefined) {
+      if (a !== undefined) { meta.meta[key] = { ts: now, deleted: true }; changed = true }
+    } else if (a === undefined) {
+      meta.meta[key] = { ts: now }; changed = true      // 新增（或删除后重新加回，顺带清掉墓碑）
+    } else if (canon(a) !== canon(b)) {
+      meta.meta[key] = { ts: now }; changed = true
+    }
+  }
+  prevProjection = next
+  if (changed) {
+    persistMeta()
+    scheduleSync()
+  }
+}
+
+// 首次见到某个条目时用 addedAt 播种（而不是 now）：
+// 否则首次登录时本地每一条都会「比云端新」，把对方设备上真正的修改全部压掉。
+// notes / pinned 没有 addedAt，取 0 = 年龄不详，输给任何一条远端记录。
+function seedMeta(projected) {
+  for (const [key, payload] of Object.entries(projected)) {
+    if (!(key in meta.meta)) meta.meta[key] = { ts: payload?.addedAt || 0 }
+  }
+}
+
+// ---- 网络 ----
+
+async function pull(supabase, userId) {
+  const rows = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('library_items')
+      .select('list_name,kind,item_id,payload,updated_at,deleted_at')
+      .eq('user_id', userId)
+      // 排序必须构成**全序**：只按 updated_at 排时，时间戳相同的行在分页之间
+      // 次序不稳定，会漏读或重复读。补上主键三列即可（PK 唯一）。
+      .order('updated_at', { ascending: true })
+      .order('list_name', { ascending: true })
+      .order('kind', { ascending: true })
+      .order('item_id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    rows.push(...(data || []))
+    if (!data || data.length < PAGE) break
+  }
+  return rows
+}
+
+async function push(supabase, userId, state, dirty) {
+  const subset = {}
+  for (const key of dirty) subset[key] = state[key]
+  const rows = toRows(subset, userId)
+  for (let i = 0; i < rows.length; i += PUSH_BATCH) {
+    const { error } = await supabase
+      .from('library_items')
+      .upsert(rows.slice(i, i + PUSH_BATCH), { onConflict: 'user_id,list_name,kind,item_id' })
+    if (error) throw new Error(error.message)
+  }
+}
+
+// ---- 同步循环 ----
+
+async function syncNow() {
+  const { user } = getAuthState()
+  if (!isSupabaseConfigured || !user) return
+  if (running) { pendingSync = true; return }
+  if (!(await ensureLeader())) return
+
+  running = true
+  setStatus({ state: 'syncing', error: null })
+  try {
+    const supabase = await getSupabase()
+
+    // 账号作用域：只有确实换到另一个账号才丢弃 meta（详见 scopeTransition 注释）
+    const { reset, scope } = scopeTransition(meta.scope, user.id)
+    if (reset) {
+      meta = { scope, meta: {} }
+      prevProjection = null
+    } else if (meta.scope !== scope) {
+      meta.scope = scope
+      persistMeta()
+    }
+
+    const rows = await pull(supabase, user.id)
+    lastPullAt = Date.now()
+    const remote = fromRows(rows)
+
+    // ★ 所有本地快照都必须在 await **之后**重新取。
+    // 网络往返期间用户完全可能又改了本地数据；拿 await 之前的快照算合并结果再整体写回，
+    // 会把这段时间内的新增抹掉，更糟的是「新时间戳 + 旧内容」会被判成本地更新，
+    // 于是把回退后的内容当成权威推上云端。
+    const before = currentLocal()
+    const projected = project(before)
+    if (prevProjection === null) { prevProjection = projected; seedMeta(projected) }
+
+    const merged = mergeStates(buildLocalState(projected, meta.meta), remote)
+    const nextLocal = toLocal(merged, before)
+
+    // 只在真的变了才写回：否则每次同步都会触发一轮无意义的重渲染
+    if (canon(project(nextLocal)) !== canon(projected)) {
+      applyingRemote = true
+      try {
+        applyRemoteLibrary(nextLocal.library)
+        applyRemoteNotes(nextLocal.notes)
+        applyRemotePinned(nextLocal.pinned)
+        mirrorRatings(nextLocal.library.watched)
+      } finally {
+        applyingRemote = false
+      }
+      prevProjection = project(currentLocal())
+    }
+
+    const dirty = computeDirty(merged, remote)
+    if (dirty.length) await push(supabase, user.id, merged, dirty)
+
+    // 同样地，推送期间 recorder 可能又记了新的时间戳/墓碑，整体赋值会覆盖掉
+    meta.meta = applyMetaWriteBack(meta.meta, merged)
+    persistMeta()
+    setStatus({ state: 'idle', lastSyncedAt: Date.now(), error: null })
+  } catch (e) {
+    setStatus({ state: 'error', error: e?.message || 'sync failed' })
+  } finally {
+    running = false
+    if (pendingSync) { pendingSync = false; syncNow() }
+  }
+}
+
+let debounceTimer = null
+function scheduleSync() {
+  const { user } = getAuthState()
+  if (!isSupabaseConfigured || !user) return
+  if (debounceTimer) clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null
+    syncNow()
+  }, DEBOUNCE_MS)
+}
+
+// ---- 多标签页：只让一个标签页负责同步 ----
+// 两个标签页同时读-合并-写是幂等的，但会白白多打一轮网络；storage 事件已经负责跨标签页同步数据。
+
+let leaderPromise = null
+function ensureLeader() {
+  if (typeof navigator === 'undefined' || !navigator.locks?.request) return Promise.resolve(true)
+  if (leaderPromise) return leaderPromise
+  leaderPromise = new Promise((resolve) => {
+    navigator.locks.request('lumenframe-sync', { mode: 'exclusive', ifAvailable: true }, (lock) => {
+      if (!lock) {
+        leaderPromise = null    // 下轮再试：leader 标签页可能已经关了
+        resolve(false)
+        return undefined
+      }
+      resolve(true)
+      return new Promise(() => {})   // 一直持有到本页关闭
+    })
+  })
+  return leaderPromise
+}
+
+// ---- 生命周期 ----
+
+let started = false
+
+function onAuthChange() {
+  const { user, ready } = getAuthState()
+  if (!ready) return
+  if (!user) {
+    setStatus({ state: 'off', error: null })
+    return
+  }
+  syncNow()
+}
+
+function onFocus() {
+  const { user } = getAuthState()
+  if (!user || document.visibilityState === 'hidden') return
+  if (Date.now() - lastPullAt < FOCUS_PULL_MS) return
+  syncNow()
+}
+
+export function initSync() {
+  if (started || !isSupabaseConfigured) return
+  started = true
+
+  meta = loadMeta()
+  prevProjection = project(currentLocal())
+  seedMeta(prevProjection)
+
+  subscribeLibrary(record)
+  subscribePinned(record)
+  subscribeAuth(onAuthChange)
+
+  window.addEventListener('focus', onFocus)
+  document.addEventListener('visibilitychange', onFocus)
+  window.addEventListener('online', () => syncNow())
+
+  onAuthChange()
+}
+
+// 供 UI 的「立即同步」按钮使用
+export function requestSync() {
+  return syncNow()
+}

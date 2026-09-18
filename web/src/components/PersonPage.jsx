@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import SmartImage from './SmartImage'
-import { apiUrl, posterUrl } from '../api'
+import StatusBadge from './StatusBadge'
+import { apiUrlWithLang, posterUrl } from '../api'
+import { useI18n } from '../i18n'
 
 function formatLifeSpan(birth, death) {
   if (!birth) return null
@@ -10,6 +12,7 @@ function formatLifeSpan(birth, death) {
 }
 
 function WorkCard({ work, onOpen }) {
+  const { t } = useI18n()
   const poster = work.poster_path ? posterUrl(work.poster_path, 'w185') : null
   return (
     <button
@@ -17,7 +20,7 @@ function WorkCard({ work, onOpen }) {
       className="group flex flex-col gap-1 text-left"
       title={`${work.title}${work.year ? ` (${work.year})` : ''}`}
     >
-      <div className="aspect-[2/3] w-full overflow-hidden bg-zinc-100">
+      <div className="relative aspect-[2/3] w-full overflow-hidden bg-zinc-100">
         {poster ? (
           <SmartImage
             src={poster}
@@ -27,19 +30,20 @@ function WorkCard({ work, onOpen }) {
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wider text-zinc-400">
-            No poster
+            {t('common.noPoster')}
           </div>
         )}
+        <StatusBadge kind={work.kind || 'movie'} id={work.id} size="md" />
       </div>
       <p className="line-clamp-2 text-xs font-medium leading-tight text-zinc-900">
         {work.title}
         {work.year && <span className="ml-1 font-normal text-zinc-500">{work.year}</span>}
       </p>
       {work.character && (
-        <p className="truncate text-[11px] text-zinc-500">as {work.character}</p>
+        <p className="truncate text-[11px] text-zinc-500">{t('person.as', { character: work.character })}</p>
       )}
       {work.episode_count > 0 && (
-        <p className="text-[11px] text-zinc-500">{work.episode_count} ep.</p>
+        <p className="text-[11px] text-zinc-500">{t('person.episodes', { n: work.episode_count })}</p>
       )}
       {work.vote_average > 0 && (
         <p className="text-[11px] font-semibold text-amber-600">★ {work.vote_average.toFixed(1)}</p>
@@ -49,13 +53,14 @@ function WorkCard({ work, onOpen }) {
 }
 
 function RoleSection({ title, movies, tv, onOpen }) {
+  const { t } = useI18n()
   if (!movies.length && !tv.length) return null
   return (
     <section className="mt-8">
       <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.25em] text-zinc-600">{title}</h3>
       {movies.length > 0 && (
         <div className="mb-5">
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-400">Films</p>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-400">{t('person.movies')}</p>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-6">
             {movies.map((w) => (
               <WorkCard key={`m:${w.id}`} work={w} onOpen={onOpen} />
@@ -65,7 +70,7 @@ function RoleSection({ title, movies, tv, onOpen }) {
       )}
       {tv.length > 0 && (
         <div>
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-400">TV Shows</p>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-400">{t('person.tvShows')}</p>
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-6">
             {tv.map((w) => (
               <WorkCard key={`t:${w.id}`} work={w} onOpen={onOpen} />
@@ -78,6 +83,7 @@ function RoleSection({ title, movies, tv, onOpen }) {
 }
 
 export default function PersonPage({ personId, isInLikes, toggleLike, onBack, onOpenMovie, onOpenShow }) {
+  const { t, apiLang } = useI18n()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -89,19 +95,20 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
     setData(null)
     ;(async () => {
       try {
-        const r = await fetch(apiUrl(`/api/person/${personId}/credits`))
+        const r = await fetch(apiUrlWithLang(`/api/person/${personId}/credits`))
         if (cancelled) return
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const json = await r.json()
         setData(json)
       } catch (e) {
-        if (!cancelled) setError(e.message || 'Failed to load person')
+        if (!cancelled) setError(e.message || t('common.error'))
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [personId])
+    // apiLang：切换语言后重新拉取（简介、作品片名随语言变化）
+  }, [personId, apiLang])
 
   // 点击作品：电影直接打开，TV（来自 TMDB id）需通过标题搜索 TVmaze 找到本地 ID 再打开
   async function handleOpenWork(work) {
@@ -110,9 +117,10 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
       return
     }
     // TV：TMDB id 与本站使用的 TVmaze id 不一致，先按 title+year 搜索
+    // 用原名（original_title）搜：TVmaze 只有英文名，中文界面下的本地化剧名匹配不到
     try {
-      const qs = new URLSearchParams({ q: work.title, limit: '3' })
-      const r = await fetch(apiUrl(`/api/search?${qs}`))
+      const qs = new URLSearchParams({ q: work.original_title || work.title, limit: '3' })
+      const r = await fetch(apiUrlWithLang(`/api/search?${qs}`))
       if (!r.ok) return
       const data = await r.json()
       const candidates = (data.results || []).filter((m) => m.kind === 'tv')
@@ -128,7 +136,6 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
   return (
     <div
       className="mx-auto w-full max-w-5xl px-4 sm:px-6"
-      style={{ fontFamily: "'Inter', Arial, sans-serif" }}
     >
       <button
         type="button"
@@ -139,10 +146,10 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
           <line x1="19" y1="12" x2="5" y2="12" />
           <polyline points="12 19 5 12 12 5" />
         </svg>
-        Back
+        {t('common.back')}
       </button>
 
-      {loading && <p className="mt-8 text-sm text-zinc-600">Loading…</p>}
+      {loading && <p className="mt-8 text-sm text-zinc-600">{t('common.loading')}</p>}
       {error && <p className="mt-8 text-sm text-red-500">{error}</p>}
 
       {data && (
@@ -161,8 +168,8 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
                   })
                 }
               }}
-              aria-label={isInLikes('person', personId) ? 'Remove from likes' : 'Add to likes'}
-              title={isInLikes('person', personId) ? 'Remove from likes' : 'Add to likes'}
+              aria-label={isInLikes('person', personId) ? t('common.removeFromLikes') : t('common.addToLikes')}
+              title={isInLikes('person', personId) ? t('common.removeFromLikes') : t('common.addToLikes')}
               className={`absolute right-0 top-0 z-10 flex h-8 w-8 items-center justify-center transition hover:opacity-70 ${
                 isInLikes('person', personId) ? 'text-red-500' : 'text-zinc-300 hover:text-zinc-500'
               }`}
@@ -181,7 +188,7 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-wider text-zinc-400">
-                  No photo
+                  {t('common.noPhoto')}
                 </div>
               )}
             </div>
@@ -217,19 +224,19 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
           {data.credits && (
             <>
               <RoleSection
-                title="Acting"
+                title={t('person.acting')}
                 movies={data.credits.acting.movies}
                 tv={data.credits.acting.tv}
                 onOpen={handleOpenWork}
               />
               <RoleSection
-                title="Directing"
+                title={t('person.directing')}
                 movies={data.credits.directing.movies}
                 tv={data.credits.directing.tv}
                 onOpen={handleOpenWork}
               />
               <RoleSection
-                title="Writing"
+                title={t('person.writing')}
                 movies={data.credits.writing.movies}
                 tv={data.credits.writing.tv}
                 onOpen={handleOpenWork}
@@ -245,7 +252,7 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
             && data.credits.writing.movies.length === 0
             && data.credits.writing.tv.length === 0 && (
               <p className="mt-12 text-center text-sm text-zinc-500">
-                No credits available for this person.
+                {t('person.noCredits')}
               </p>
             )}
         </>

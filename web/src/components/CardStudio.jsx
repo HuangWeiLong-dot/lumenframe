@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Card, { TEMPLATE_LIST } from './Card'
 import CollapsibleSection from './CollapsibleSection'
+import { useI18n } from '../i18n'
 
 const TEMPLATES = TEMPLATE_LIST
 
@@ -25,27 +26,27 @@ const TEXT_COLORS = [
 ]
 
 const MOVIE_OPTIONS = [
-  { key: 'showRatings', label: 'Ratings' },
-  { key: 'showYear', label: 'Year' },
-  { key: 'showOverview', label: 'Synopsis' },
-  { key: 'showDirector', label: 'Director' },
-  { key: 'showWriter', label: 'Writer' },
-  { key: 'showDop', label: 'Cinematography' },
-  { key: 'showCast', label: 'Cast' },
-  { key: 'showSpecs', label: 'Tech Specs' },
-  { key: 'showNote', label: 'My Note' },
+  { key: 'showRatings', labelKey: 'cardStudio.ratings' },
+  { key: 'showYear', labelKey: 'cardStudio.year' },
+  { key: 'showOverview', labelKey: 'cardStudio.synopsis' },
+  { key: 'showDirector', labelKey: 'cardStudio.director' },
+  { key: 'showWriter', labelKey: 'cardStudio.writer' },
+  { key: 'showDop', labelKey: 'cardStudio.cinematography' },
+  { key: 'showCast', labelKey: 'cardStudio.cast' },
+  { key: 'showSpecs', labelKey: 'cardStudio.techSpecs' },
+  { key: 'showNote', labelKey: 'cardStudio.myNote' },
 ]
 
 const SHOW_OPTIONS = [
-  { key: 'showRatings', label: 'Ratings' },
-  { key: 'showYear', label: 'Year' },
-  { key: 'showOverview', label: 'Synopsis' },
-  { key: 'showCast', label: 'Cast' },
-  { key: 'showShowYears', label: 'Years' },
-  { key: 'showShowSeasons', label: 'Seasons' },
-  { key: 'showShowNetwork', label: 'Network' },
-  { key: 'showShowStatus', label: 'Status' },
-  { key: 'showNote', label: 'My Note' },
+  { key: 'showRatings', labelKey: 'cardStudio.ratings' },
+  { key: 'showYear', labelKey: 'cardStudio.year' },
+  { key: 'showOverview', labelKey: 'cardStudio.synopsis' },
+  { key: 'showCast', labelKey: 'cardStudio.cast' },
+  { key: 'showShowYears', labelKey: 'cardStudio.showYears' },
+  { key: 'showShowSeasons', labelKey: 'cardStudio.showSeasons' },
+  { key: 'showShowNetwork', labelKey: 'cardStudio.showNetwork' },
+  { key: 'showShowStatus', labelKey: 'cardStudio.showStatus' },
+  { key: 'showNote', labelKey: 'cardStudio.myNote' },
 ]
 
 const ALIGN_OPTIONS = [
@@ -79,6 +80,7 @@ function Section({ title, children, last = false }) {
 // --- component ---
 
 export default function CardStudio({ movie, specs, specsLoading, ratings, ratingsLoading, personal, onPersonal, cardImage, onClearCardImage, note }) {
+  const { t } = useI18n()
   const [config, setConfig] = useState({
     template: 'minimal',
     size: '4:5',
@@ -134,7 +136,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
     { key: 'showRt', label: 'Tomatometer', value: ratings?.rotten_tomatoes != null ? `${ratings.rotten_tomatoes}%` : null },
     { key: 'showPop', label: 'Popcornmeter', value: ratings?.popcornmeter != null ? `${ratings.popcornmeter}%` : null },
     { key: 'showMeta', label: 'Metascore', value: ratings?.metacritic != null ? String(ratings.metacritic) : null },
-    { key: 'showPersonal', label: 'My Score', value: personal > 0 ? String(personal) : null },
+    { key: 'showPersonal', label: t('cardStudio.myScore'), value: personal > 0 ? String(personal) : null },
   ]
 
   useLayoutEffect(() => {
@@ -192,13 +194,13 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
   }
 
   const loadingText = [
-    !isShow && specsLoading && 'tech specs',
-    ratingsLoading && 'ratings',
+    !isShow && specsLoading && t('cardStudio.techSpecs'),
+    ratingsLoading && t('cardStudio.ratings'),
   ].filter(Boolean).join(' & ')
 
   return (
     <CollapsibleSection
-      title="Card Studio"
+      title={t('cardStudio.title')}
       defaultOpen
       action={
         <button
@@ -206,7 +208,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           disabled={exporting}
           className="inline-flex items-center gap-1.5 border border-black bg-black px-3 py-1.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:opacity-50"
         >
-          {exporting ? 'Rendering…' : 'Download PNG'}
+          {exporting ? t('cardStudio.rendering') : t('cardStudio.downloadPng')}
         </button>
       }
     >
@@ -221,7 +223,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               <button
                 type="button"
                 onClick={openPreview}
-                aria-label="Preview generated card"
+                aria-label={t('cardStudio.previewCard')}
                 className="group relative block overflow-hidden ring-0 transition-[width,height] duration-200 ease-out"
                 style={{ width: previewW, height: previewH }}
               >
@@ -252,7 +254,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           </div>
           {/* Preview hint */}
           <p className="mt-2 text-center text-[11px] text-zinc-400">
-            Click card to preview · {size.w}×{size.h}px
+            {t('cardStudio.clickToPreview')} · {size.w}×{size.h}px
           </p>
         </div>
 
@@ -260,11 +262,11 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
         <div className="order-2 mt-2">
 
           {/* Template */}
-          <Section title="Template">
+          <Section title={t('cardStudio.template')}>
             <div className="grid grid-cols-3 gap-2">
-              {TEMPLATES.map((t) => (
-                <button key={t.id} onClick={() => pickTemplate(t.id)} className={pill(config.template === t.id)}>
-                  {t.label}
+              {TEMPLATES.map((tpl) => (
+                <button key={tpl.id} onClick={() => pickTemplate(tpl.id)} className={pill(config.template === tpl.id)}>
+                  {t(`cardStudio.${tpl.id}`)}
                 </button>
               ))}
             </div>
@@ -273,7 +275,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           {/* Size + Text Align — side by side */}
           <div className="flex flex-col gap-5 border-b border-zinc-300 pb-5 mb-5 sm:flex-row">
             <div className="flex-1">
-              <p className={sectionLabel}>Size</p>
+              <p className={sectionLabel}>{t('cardStudio.size')}</p>
               <div
                 className="mt-3 grid gap-2"
                 style={{ gridTemplateColumns: `repeat(${visibleSizes.length}, minmax(0, 1fr))` }}
@@ -290,7 +292,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               </div>
             </div>
             <div className="flex-1">
-              <p className={sectionLabel}>Text Align</p>
+              <p className={sectionLabel}>{t('cardStudio.textAlign')}</p>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 {ALIGN_OPTIONS.map((a) => (
                   <button
@@ -301,7 +303,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                         ? 'border-black bg-black text-white'
                         : 'border-zinc-300 bg-white text-zinc-600 hover:border-black'
                     }`}
-                    title={a.label}
+                    title={t(`cardStudio.${a.id}`)}
                   >
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                       <path d={a.icon} />
@@ -313,14 +315,14 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           </div>
 
           {/* Background */}
-          <Section title="Background">
+          <Section title={t('cardStudio.background')}>
             <div className="flex flex-wrap items-center gap-2">
               {COLORS.map((c) => (
                 <button
                   key={c}
                   onClick={() => set({ bgColor: c })}
                   style={{ background: c }}
-                  aria-label={`color ${c}`}
+                  aria-label={`${t('cardStudio.background')} ${c}`}
                   className={`h-7 w-7 border transition ${
                     config.bgColor === c ? 'border-black ring-2 ring-black ring-offset-1' : 'border-zinc-300 hover:scale-110'
                   }`}
@@ -330,14 +332,14 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                 type="color"
                 value={config.bgColor}
                 onChange={(e) => set({ bgColor: e.target.value })}
-                aria-label="custom color"
+                aria-label={t('cardStudio.customColor')}
                 className="h-7 w-9 cursor-pointer border border-zinc-300 bg-white"
               />
             </div>
           </Section>
 
           {/* Font Color */}
-          <Section title="Font Color">
+          <Section title={t('cardStudio.fontColor')}>
             <div className="flex flex-wrap items-center gap-2">
               {TEXT_COLORS.map((t) => (
                 <button
@@ -356,14 +358,14 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                 type="color"
                 value={TEXT_COLORS.find((t) => t.id === config.textColor)?.hex || '#FFFFFF'}
                 onChange={(e) => set({ textColor: e.target.value })}
-                aria-label="custom font color"
+                aria-label={t('cardStudio.customColor')}
                 className="h-7 w-9 cursor-pointer border border-zinc-300 bg-white"
               />
             </div>
           </Section>
 
           {/* Layout toggles */}
-          <Section title="Content">
+          <Section title={t('cardStudio.content')}>
             <div className="grid grid-cols-2 gap-2">
               {options.map((o) => (
                 <button
@@ -375,7 +377,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                       : 'border-zinc-300 bg-white text-zinc-600 hover:border-black'
                   }`}
                 >
-                  {o.label}
+                  {t(o.labelKey)}
                 </button>
               ))}
             </div>
@@ -383,7 +385,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
 
           {/* Rating Sources */}
           {config.showRatings && (
-            <Section title="Rating Sources">
+            <Section title={t('cardStudio.ratingSources')}>
               <div className="grid grid-cols-3 gap-2">
                 {ratingSources.map((s) => {
                   const available = s.value != null
@@ -410,7 +412,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           )}
 
           {/* My Rating */}
-          <Section title="My Rating">
+          <Section title={t('cardStudio.myRating')}>
             <div
               className="flex flex-wrap items-center gap-1"
               onMouseLeave={() => setHoverRating(0)}
@@ -423,7 +425,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                     onClick={() => onPersonal(personal === n ? 0 : n)}
                     onMouseEnter={() => setHoverRating(n)}
                     onMouseLeave={() => setHoverRating(0)}
-                    aria-label={`rate ${n}`}
+                    aria-label={t('cardStudio.rateN', { n })}
                     className={`text-lg leading-none transition ${lit ? 'text-amber-500' : 'text-zinc-300 hover:text-amber-400'}`}
                   >
                     ★
@@ -432,7 +434,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               })}
               {personal > 0 && (
                 <button onClick={() => onPersonal(0)} className="ml-2 text-xs text-zinc-500 underline underline-offset-2 hover:text-black">
-                  Clear
+                  {t('cardStudio.clear')}
                 </button>
               )}
             </div>
@@ -441,7 +443,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
           {/* Status bar */}
           <div className="border-b border-zinc-300 pb-4 mb-4">
             <div className="text-[11px] leading-relaxed text-zinc-500">
-              {loadingText ? `Fetching ${loadingText}…` : ''}
+              {loadingText ? t('cardStudio.fetching', { what: loadingText }) : ''}
               {ratings
                 ? `TMDB ${typeof movie.rating === 'number' ? movie.rating.toFixed(1) : '—'} · IMDb ${ratings.imdb != null ? ratings.imdb.toFixed(1) : '—'} · 🍅 ${ratings.rotten_tomatoes != null ? ratings.rotten_tomatoes + '%' : '—'} · 🍿 ${ratings.popcornmeter != null ? ratings.popcornmeter + '%' : '—'} · Metascore ${ratings.metacritic != null ? ratings.metacritic : '—'}`
                 : `TMDB ${typeof movie.rating === 'number' ? movie.rating.toFixed(1) : '—'}`}
@@ -449,10 +451,10 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
             {cardImage && (
               <div className="mt-3 flex items-center justify-between gap-3 border border-zinc-200 bg-zinc-50 px-3 py-2 rounded">
                 <p className="text-[11px] text-zinc-600">
-                  Card image · <span className="font-medium text-zinc-800">custom still / backdrop</span>
+                  {t('cardStudio.cardImage')} · <span className="font-medium text-zinc-800">{t('cardStudio.customStill')}</span>
                 </p>
                 <button onClick={onClearCardImage} className="text-[11px] text-zinc-500 underline underline-offset-2 hover:text-black">
-                  Reset to poster
+                  {t('cardStudio.resetToPoster')}
                 </button>
               </div>
             )}
@@ -468,7 +470,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
         >
           <img
             src={previewUrl}
-            alt="Generated card preview"
+            alt={t('cardStudio.previewAlt')}
             className="max-h-[90vh] max-w-[92vw] object-contain shadow-2xl"
           />
         </div>
