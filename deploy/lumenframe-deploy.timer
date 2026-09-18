@@ -1,0 +1,14 @@
+[Unit]
+Description=Check LUMENFRAME backend for new commits every 2 minutes
+
+[Timer]
+# 开机 2 分钟后查一次，之后每 2 分钟一次（计时从上一轮**启动**时刻算起）
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+# systemd 不会在上一次还没跑完时重复启动同一个 oneshot unit，
+# 所以不需要自己加锁
+Unit=lumenframe-deploy.service
+
+[Install]
+WantedBy=timers.target
