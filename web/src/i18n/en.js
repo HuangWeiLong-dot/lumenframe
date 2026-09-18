@@ -436,6 +436,8 @@ export default {
   'sync.error': 'Sync failed',
   'sync.retry': 'Retry',
   'sync.now': 'Sync now',
+  'sync.guardBlocked': '{n} deletions held back',
+  'sync.confirmDeletes': 'Confirm deletions',
   'sync.localOnly': 'Saved on this device only',
   'sync.signInToSync': 'Sign in to sync across devices',
   'sync.justNow': 'just now',

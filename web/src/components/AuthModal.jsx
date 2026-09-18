@@ -120,6 +120,8 @@ export default function AuthModal() {
   function statusLine() {
     if (sync.state === 'syncing') return t('sync.syncing')
     if (sync.state === 'error') return t('sync.error')
+    // 熔断：这一轮有一批删除被扣下，等用户确认（见 engine 的 requestSync）
+    if (sync.state === 'guard') return t('sync.guardBlocked', { n: sync.blockedDeletes })
     if (sync.lastSyncedAt) {
       const time = new Date(sync.lastSyncedAt).toLocaleTimeString(dateLocale, {
         hour: '2-digit',
@@ -197,13 +199,20 @@ export default function AuthModal() {
                         ? 'animate-pulse bg-black'
                         : sync.state === 'error'
                           ? 'bg-red-500'
-                          : 'bg-zinc-300'
+                          : sync.state === 'guard'
+                            ? 'bg-amber-500'
+                            : 'bg-zinc-300'
                     }`}
                   />
                   {statusLine()}
                 </span>
+                {/* guard 状态下这个按钮是二次确认：点下去 = 放行被扣下的删除 */}
                 <button type="button" onClick={requestSync} className={BTN_LINK}>
-                  {sync.state === 'error' ? t('sync.retry') : t('sync.now')}
+                  {sync.state === 'error'
+                    ? t('sync.retry')
+                    : sync.state === 'guard'
+                      ? t('sync.confirmDeletes')
+                      : t('sync.now')}
                 </button>
               </div>
               <button type="button" onClick={auth.signOut} className={BTN_PRIMARY}>
