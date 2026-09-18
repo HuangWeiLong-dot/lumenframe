@@ -1,6 +1,9 @@
 node_modules/
 dist/
+# `.env` 只匹配这个文件名本身，不匹配 .env.local / .env.production
 .env
+.env.local
+.env.*.local
 tmdb_test.json
 server/.cache/
 docs/

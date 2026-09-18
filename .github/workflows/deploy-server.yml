@@ -1,0 +1,79 @@
+name: Deploy backend to server
+
+on:
+  push:
+    branches: [main, master]
+    # 只有后端代码变了才重启服务；纯前端改动走 deploy-pages.yml
+    paths:
+      - 'server/**'
+      - 'filmgrab-service/**'
+      - '.github/workflows/deploy-server.yml'
+  workflow_dispatch:
+
+# 同一时间只允许一次服务器部署，避免两次 push 的 restart 交错
+concurrency:
+  group: server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 仓库 Settings → Secrets and variables → Actions → Secrets 需配置：
+      #   SERVER_IP（必填）：服务器 IP
+      #   SERVER_USER（必填）：当前是 root（见两个 .service 的 WorkingDirectory=/root/lumenframe）
+      #   SSH_PRIVATE_KEY（必填）：能登录该机器的私钥全文
+      #   SSH_PORT（可选）：默认 22
+      - name: Pull & restart over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true      # 任一步失败即中断，不会带着半截状态去 restart
+          command_timeout: 15m   # pip 装 curl_cffi 可能较慢
+          script: |
+            set -e
+            cd /root/lumenframe
+
+            # 部署检出目录：丢弃服务器上的本地改动，强制与远端对齐。
+            # server/.env、server/.cache/、docs/、node_modules/ 都在 .gitignore 里，
+            # reset 不会碰它们；但**在服务器上手工改过的被跟踪文件会被覆盖**。
+            git fetch --prune origin
+            git reset --hard origin/main   # 默认分支若是 master，改成 origin/master
+
+            echo "== 部署版本 $(git log --oneline -1)"
+
+            # Node 依赖：package-lock.json 已入库，用 ci 保证可复现
+            cd /root/lumenframe/server
+            npm ci --omit=dev
+
+            # Python 依赖：.venv 是 start.ps1 建的，systemd 的 ExecStart 也指向它
+            cd /root/lumenframe/filmgrab-service
+            if [ -x .venv/bin/pip ]; then
+              .venv/bin/pip install -q -r requirements.txt
+            else
+              echo "!! 未找到 .venv，跳过 Python 依赖安装（剧照服务可能起不来）"
+            fi
+
+            # SERVER_USER 是 root，直接 systemctl；非 root 用户需改成 sudo systemctl
+            systemctl restart lumenframe-server lumenframe-filmgrab
+
+            # systemd Type=simple 在 fork 后就返回，此时端口未必已监听，所以轮询探测。
+            # curl 不带 -f：拿到任意 HTTP 响应（含 404）即说明端口活了。
+            wait_http() {
+              for _ in $(seq 1 15); do
+                if curl -s -o /dev/null --max-time 3 "$1"; then
+                  echo "  ✓ $2 已响应"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "  ✗ $2 在 30 秒内无响应"
+              return 1
+            }
+            wait_http http://127.0.0.1:3002/ "Node API :3002"
+            wait_http http://127.0.0.1:8000/ "FilmGrab :8000"
+
+            systemctl --no-pager --lines=0 status lumenframe-server lumenframe-filmgrab || true

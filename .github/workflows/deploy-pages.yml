@@ -26,7 +26,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 必须是 22+：@supabase/supabase-js 的 engines 要求 node >=22
+          # （2.116.0 起；最后支持 20 的版本是 2.105.0）
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -44,8 +46,14 @@ jobs:
           #                     仅在有特殊需求时覆盖
           #   FILMGRAB_BASE（可选）：剧照服务挂载前缀，如
           #                     https://api.example.com/filmgrab；不部署则留空（区块自动隐藏）
+          #   SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY（可选）：启用账号与云端同步时填写；
+          #                     留空则不注入，账号入口自动隐藏。
+          #                     用 Variables 而非 Secrets —— publishable key 本就是公开的，
+          #                     放进 Secrets 只会让构建更难排查。
           VITE_API_BASE: ${{ vars.API_BASE }}
           VITE_FILMGRAB_BASE: ${{ vars.FILMGRAB_BASE }}
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
         run: |
           BASE_PATH="${{ vars.BASE_PATH }}"
           if [ -z "$BASE_PATH" ]; then
