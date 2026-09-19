@@ -4,6 +4,7 @@ import StatusBadge from './StatusBadge'
 import NavLink from './NavLink'
 import { apiUrlWithLang, posterUrl } from '../api'
 import { titleUrl, preopenTab, setTabUrl, closeTab } from '../routes'
+import { setDocTitle, setTabTitle } from '../docTitle'
 import { useI18n } from '../i18n'
 
 function formatLifeSpan(birth, death) {
@@ -119,12 +120,18 @@ export default function PersonPage({ personId, isInLikes, toggleLike, onBack, on
     // apiLang：切换语言后重新拉取（简介、作品片名随语言变化）
   }, [personId, apiLang])
 
+  // 标签页标题：人名只有这里取到（App 手里只有 URL 里的 id）。
+  // 名字来自 TMDB person，本身不随语言变，语言切换后的重取不会改变结果。
+  useEffect(() => { setDocTitle(data?.name) }, [data?.name])
+
   // 剧集作品：work.id 是 TMDB id，与本站使用的 TVmaze id 不一致，先按 title+year 搜到再打开。
   // 电影的作品卡片本身就是 <NavLink>（同步能拼出 href），走不到这里。
   async function handleOpenWork(work) {
     // 先在点击的同步阶段占一个标签页：下面的 await 之后调用栈已退出点击事件，
     // 那时再 window.open 会被弹窗拦截
     const tab = preopenTab()
+    // 占位标签页在搜到 TVmaze id 之前标题是 about:blank，先把剧名填上
+    setTabTitle(tab, work.title)
     // 用原名（original_title）搜：TVmaze 只有英文名，中文界面下的本地化剧名匹配不到
     try {
       const qs = new URLSearchParams({ q: work.original_title || work.title, limit: '3' })

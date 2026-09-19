@@ -29,6 +29,7 @@ import {
   preopenTab, setTabUrl, closeTab,
 } from './routes'
 import NavLink from './components/NavLink'
+import { setDocTitle, setTabTitle } from './docTitle'
 import { safeGet, safeSet } from './storage'
 import { DetailHeaderSkeleton, RatingsSkeleton, SpecsSkeleton } from './components/Skeleton'
 import StatusBadge from './components/StatusBadge'
@@ -276,7 +277,7 @@ export default function App() {
   // 本地观影库（watched / watch later）
   const lib = useLibrary()
   const pins = usePinned()
-  const { t, apiLang } = useI18n()
+  const { t, apiLang, lang } = useI18n()
   // 当前电影页能否用浏览器后退：应用内点选进来为 true（回到上一页）；
   // 深链直接打开为 false（Back 按钮改走回主页）
   const canBackRef = useRef(false)
@@ -572,6 +573,8 @@ export default function App() {
                             { history: historyOpt = 'push', scroll = true, target = 'self' } = {}) {
     let tab = target === 'new' ? preopenTab() : null
     if (target === 'new' && !tab) target = 'self' // 被拦截 → 退回原地跳转
+    // 占位标签页在查到 TMDB id 之前标题是 about:blank，先把人名填上
+    if (tab) setTabTitle(tab, name)
 
     let tmdbId = null
     if (source === 'tmdb' && id) {
@@ -661,6 +664,16 @@ export default function App() {
     // 仅在语言变化时触发；openTitle 每次渲染都是新引用，不能进依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiLang])
+
+  // 标签页标题：当前页面 + 当前语言。
+  // 电影/剧集、观影库、首页在这里统管；演职员页和类型页由各自组件设置 ——
+  // App 手里只有 URL 里的 id，名字要等子组件取到数据 / 类型名录才有。
+  // lang 必须在依赖里：观影库标题是「我的观影库 / My Library」，与数据无关，只在语言变化时变。
+  useEffect(() => {
+    if (view === 'movie') setDocTitle(movie?.title)
+    else if (view === 'library') setDocTitle(t('library.myLibrary'))
+    else if (view === 'home') setDocTitle(null)
+  }, [view, movie?.title, lang])
 
   // 首屏深链直开
   useEffect(() => {

@@ -4,6 +4,7 @@ import StatusBadge from './StatusBadge'
 import NavLink from './NavLink'
 import { apiUrlWithLang, posterUrl } from '../api'
 import { titleUrl } from '../routes'
+import { setDocTitle } from '../docTitle'
 import { useI18n } from '../i18n'
 
 function TitleCard({ item, kind }) {
@@ -48,6 +49,37 @@ export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleL
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // 类型名：原地从详情页点进来时由 App 传入（已是当前语言的名称）；新标签页/深链打开
+  // 只有 kind+id —— 中文类型名的 slug 被 slugify 剥空了，URL 里根本带不了名字，
+  // 只能按当前语言查一次类型名录（与观影库「喜欢」回填类型名用的是同一个接口）。
+  const [fetchedName, setFetchedName] = useState('')
+  useEffect(() => {
+    setFetchedName('')
+    if (genreName) return
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await fetch(apiUrlWithLang('/api/genres'))
+        if (!r.ok) return
+        const list = (await r.json())[kind] || []
+        // movie / tv 的类型 id 是各自独立的命名空间，所以按 kind 取表
+        const hit = list.find((g) => String(g.id) === String(genreId))
+        if (alive && hit) setFetchedName(hit.name)
+      } catch { /* 静默：名字取不到就退化成「类型」，不影响列表 */ }
+    })()
+    return () => { alive = false }
+  }, [genreName, kind, genreId, apiLang])
+  const displayName = genreName || fetchedName
+
+  // 标签页标题：类型名 + 电影/剧集。带上后者是因为 movie 和 tv 各有一套类型表，
+  // 光看「动作」分不清是新开的哪个页面。
+  useEffect(() => {
+    const kindLabel = kind === 'tv' ? t('genre.tvShows') : t('genre.movies')
+    setDocTitle(displayName ? `${displayName} · ${kindLabel}` : kindLabel)
+    // apiLang：语言切换后名字变化要重设标题（t 的引用不变，只能靠它触发）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayName, kind, apiLang])
 
   useEffect(() => {
     let cancelled = false
@@ -107,7 +139,7 @@ export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleL
               toggleLike('genre', genreId)
             } else {
               toggleLike('genre', genreId, {
-                name: genreName || t('genre.genre'),
+                name: displayName || t('genre.genre'),
                 kind,
               })
             }
@@ -123,7 +155,7 @@ export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleL
           </svg>
         </button>
         <h1 className="text-3xl font-bold uppercase tracking-tight text-zinc-900 sm:text-4xl">
-          {genreName || t('genre.genre')}
+          {displayName || t('genre.genre')}
         </h1>
       </div>
       <p className="mt-1 text-xs uppercase tracking-[0.25em] text-zinc-500">
