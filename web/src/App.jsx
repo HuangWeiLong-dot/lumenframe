@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import CardStudio from './components/CardStudio'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import CollapsibleSection from './components/CollapsibleSection'
 import MovieCollage from './components/MovieCollage'
 import QuizRecommender from './components/QuizRecommender'
@@ -16,10 +15,8 @@ import Footer from './components/Footer'
 import Header from './components/Header'
 import PinnedDrawer from './components/PinnedDrawer'
 import LanguagePicker from './components/LanguagePicker'
-import LibraryPage from './components/LibraryPage'
-import PersonPage from './components/PersonPage'
-import GenrePage from './components/GenrePage'
 import { useTrending } from './hooks/useTrending'
+import { onIdle } from './idle'
 import { useLibrary, ratingStorageKey, entryKey } from './hooks/useLibrary'
 import { usePinned } from './hooks/usePinned'
 import { useI18n } from './i18n'
@@ -35,6 +32,16 @@ import NavLink from './components/NavLink'
 import { safeGet, safeSet } from './storage'
 import { DetailHeaderSkeleton, RatingsSkeleton, SpecsSkeleton } from './components/Skeleton'
 import StatusBadge from './components/StatusBadge'
+
+// 按需加载：这四个都只在特定路由/状态下才渲染，静态引入会把它们的代码
+// （尤其是 LibraryPage → LibraryStats → chart.js，约 200 KB 源码）塞进首屏主包。
+// Lighthouse 实测首屏有 188 KiB 未使用的 JS，主体就是它。
+// 首页真正要用的 MovieCollage / QuizRecommender 刻意保持静态引入 ——
+// 它们是 LCP 表面，延迟加载反而推迟首屏。
+const CardStudio = lazy(() => import('./components/CardStudio'))
+const LibraryPage = lazy(() => import('./components/LibraryPage'))
+const PersonPage = lazy(() => import('./components/PersonPage'))
+const GenrePage = lazy(() => import('./components/GenrePage'))
 
 // ---- 极简 History API 路由 ----
 // 电影：{BASE}movie/{tmdbId}-{slug}；剧集：{BASE}tv/{tvmazeId}-{slug}
@@ -99,13 +106,22 @@ function PosterBackground() {
       }))
     }
 
+    // 海报墙的图像延后到浏览器空闲再建。canvas 的 Image() 没有懒加载：原先
+    // /api/trending 一返回就并发拉 20 张 w342（约 1 MB），正好在 LCP 那张海报图
+    // 要下载时把慢速 4G 的带宽吃干净 —— 这是首屏 LCP 最大的单一干扰源。
+    // 本墙画在 rgba(255,255,255,0.85) 遮罩 + 灰度滤镜下，canvas globalAlpha 0.38，
+    // 有效不透明度约 5.7%，晚出现几秒、尺寸降一档都看不出来。
+    // w185 与 MovieCollage 的 srcset 移动端档位一致，可复用同一份 HTTP 缓存。
     const imgMap = new Map()
-    posters.forEach((p) => {
-      const img = new Image()
-      img.crossOrigin = 'anonymous' // 跨域部署时保证背景 canvas 不被标记为 tainted
-      img.src = posterUrl(p.poster_path, 'w342')
-      imgMap.set(p.id, img)
-    })
+    const buildImages = () => {
+      posters.forEach((p) => {
+        const img = new Image()
+        img.crossOrigin = 'anonymous' // 跨域部署时保证背景 canvas 不被标记为 tainted
+        img.src = posterUrl(p.poster_path, 'w185')
+        imgMap.set(p.id, img)
+      })
+    }
+    const cancelIdleBuild = onIdle(buildImages, 3000)
 
     let COLUMNS = calcColumns(window.innerWidth)
     let cols = buildCols(COLUMNS)
@@ -168,6 +184,7 @@ function PosterBackground() {
     raf = requestAnimationFrame(draw)
 
     return () => {
+      cancelIdleBuild()
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
       io.disconnect()
@@ -478,9 +495,16 @@ export default function App() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Failed to load ${kind === 'tv' ? 'show' : 'movie'}`)
       setMovie(data)
-      // 语言可能已切换：把最新标题同步回收藏/观影库（本地存的是当初打开时的语言）
+      // 语言可能已切换：把最新的本地化元信息（标题 / 类型名 / 海报）同步回收藏、观影库与「喜欢」
+      // 本地存的是当初打开时的语言快照；未命中的条目 / 未变的字段不会写入
       pins.updateEntry(kind, data.id, { title: data.title })
-      lib.updateTitle(kind, data.id, data.title)
+      lib.updateEntryMeta(kind, data.id, { title: data.title, genres: data.genres, poster_path: data.poster_path })
+      lib.updateLikesMeta([{
+        type: kind,
+        id: data.id,
+        name: data.title,
+        poster: data.poster_path ? posterUrl(data.poster_path, 'w185') : undefined,
+      }])
       // 评分优先取观影库条目：云端合并后 watched[].myRating 才是权威值，
       // 标量 key 仅作为「评了分但没加入片库」时的兜底（否则合并后详情页会显示旧分）
       const ratedEntry = lib.watched.find(
@@ -708,20 +732,24 @@ export default function App() {
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-24"
         >
-          <LibraryPage onGoHome={goHome} />
+          <Suspense fallback={null}>
+            <LibraryPage onGoHome={goHome} />
+          </Suspense>
         </main>
       ) : view === 'person' ? (
         <main
           className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
         >
           {person && (
-            <PersonPage
-              personId={person.id}
-              isInLikes={lib.isInLikes}
-              toggleLike={lib.toggleLike}
-              onBack={() => (canBackRef.current ? window.history.back() : goHome())}
-              onOpenShow={openShow}
-            />
+            <Suspense fallback={null}>
+              <PersonPage
+                personId={person.id}
+                isInLikes={lib.isInLikes}
+                toggleLike={lib.toggleLike}
+                onBack={() => (canBackRef.current ? window.history.back() : goHome())}
+                onOpenShow={openShow}
+              />
+            </Suspense>
           )}
         </main>
       ) : view === 'genre' ? (
@@ -729,14 +757,16 @@ export default function App() {
           className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
         >
           {genre && (
-            <GenrePage
-              kind={genre.kind}
-              genreId={genre.id}
-              genreName={genre.name}
-              isInLikes={lib.isInLikes}
-              toggleLike={lib.toggleLike}
-              onBack={() => (canBackRef.current ? window.history.back() : goHome())}
-            />
+            <Suspense fallback={null}>
+              <GenrePage
+                kind={genre.kind}
+                genreId={genre.id}
+                genreName={genre.name}
+                isInLikes={lib.isInLikes}
+                toggleLike={lib.toggleLike}
+                onBack={() => (canBackRef.current ? window.history.back() : goHome())}
+              />
+            </Suspense>
           )}
         </main>
       ) : (
@@ -1511,18 +1541,20 @@ export default function App() {
       )}
 
       {movie && !detailLoading && (
-        <CardStudio
-          movie={movie}
-          specs={specs}
-          specsLoading={specsLoading}
-          ratings={ratings}
-          ratingsLoading={ratingsLoading}
-          personal={personal}
-          onPersonal={changePersonal}
-          cardImage={cardImage}
-          onClearCardImage={() => setCardImage(null)}
-          note={note}
-        />
+        <Suspense fallback={null}>
+          <CardStudio
+            movie={movie}
+            specs={specs}
+            specsLoading={specsLoading}
+            ratings={ratings}
+            ratingsLoading={ratingsLoading}
+            personal={personal}
+            onPersonal={changePersonal}
+            cardImage={cardImage}
+            onClearCardImage={() => setCardImage(null)}
+            note={note}
+          />
+        </Suspense>
       )}
 
     </main>

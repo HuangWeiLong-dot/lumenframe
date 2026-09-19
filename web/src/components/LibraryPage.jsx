@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { posterFor, apiUrl } from '../api'
+import { useEffect, useState } from 'react'
+import { posterFor, posterUrl, apiUrl, apiUrlWithLang } from '../api'
 import { useLibrary } from '../hooks/useLibrary'
 import { useI18n } from '../i18n'
 import { titleUrl, personUrl, genreUrl } from '../routes'
@@ -183,7 +183,7 @@ function LikeCard({ item, onRemove }) {
 
 export default function LibraryPage({ onGoHome }) {
   const [tab, setTab] = useState('watched')
-  const { t } = useI18n()
+  const { t, apiLang } = useI18n()
   // 解构带默认值：即使存储层返回的数据形状异常（如 localStorage 被禁用），列表也不会是 undefined
   const {
     watched = [],
@@ -193,7 +193,91 @@ export default function LibraryPage({ onGoHome }) {
     removeFromWatchLater,
     removeFromLikes,
     refreshAllRatings,
+    updateEntriesMeta,
+    updateLikesMeta,
   } = useLibrary()
+
+  // 语言切换后回填本地化元信息：观影库（看过/待看）与「喜欢」里的电影条目
+  // 存的是加入/点赞那一刻的语言快照，不随语言实时变化。
+  // 例外（上游本身不随语言变，无需重取）：剧集标题来自 TVmaze；演职员姓名来自 TMDB person，均无中文本地化。
+  // 类型点赞只有 id，靠 /api/genres 拿到当前语言的类型名。
+  useEffect(() => {
+    // 同一部电影可能既在观影库又在「喜欢」里：按 id 去重，只取一次数据、两处各自回填
+    const seenMovieIds = new Set()
+    const movieIds = [...watched, ...watchlater]
+      .filter((m) => m.kind === 'movie' && !seenMovieIds.has(m.id) && seenMovieIds.add(m.id))
+      .map((m) => m.id)
+    // 「喜欢」里的电影：同样按 TMDB id 取当前语言的标题与海报
+    const likedMovieIds = likes
+      .filter((l) => l.type === 'movie' && !seenMovieIds.has(l.id) && seenMovieIds.add(l.id))
+      .map((l) => l.id)
+    const likedGenres = likes.filter((l) => l.type === 'genre')
+    const hasLikedMeta = likes.some((l) => l.type === 'movie' || l.type === 'genre')
+    if (movieIds.length === 0 && !hasLikedMeta) return
+
+    let alive = true
+    ;(async () => {
+      const allMovieIds = [...new Set([...movieIds, ...likedMovieIds])]
+      const [movieResults, genreList] = await Promise.all([
+        Promise.all(
+          allMovieIds.map(async (id) => {
+            try {
+              const res = await fetch(apiUrlWithLang(`/api/movie/${id}`))
+              if (!res.ok) return null
+              const data = await res.json()
+              return {
+                id,
+                title: data.title,
+                genres: data.genres,
+                poster_path: data.poster_path,
+              }
+            } catch {
+              return null
+            }
+          })
+        ),
+        likedGenres.length > 0
+          ? fetch(apiUrlWithLang('/api/genres'))
+              .then((r) => (r.ok ? r.json() : null))
+              .catch(() => null)
+          : Promise.resolve(null),
+      ])
+      if (!alive) return
+
+      const movies = movieResults.filter(Boolean)
+      if (movies.length > 0) {
+        updateEntriesMeta(
+          movies.map((m) => ({
+            kind: 'movie',
+            id: m.id,
+            title: m.title,
+            genres: m.genres,
+            poster_path: m.poster_path,
+          }))
+        )
+      }
+      // 电影与类型两类点赞合并成一次写入：只通知一次，也不会出现「电影已换语言、类型还没换」的中间态
+      if (movies.length > 0 || (genreList && likedGenres.length > 0)) {
+        const likePatches = movies.map((m) => ({
+          type: 'movie',
+          id: m.id,
+          name: m.title,
+          // 「喜欢」只更新标题与海报（无类型名等字段）；海报缺失时保留原值
+          poster: m.poster_path ? posterUrl(m.poster_path, 'w185') : undefined,
+        }))
+        if (genreList) {
+          for (const l of likedGenres) {
+            const table = genreList[l.kind === 'tv' ? 'tv' : 'movie'] || []
+            const hit = table.find((g) => Number(g.id) === Number(l.id))
+            if (hit) likePatches.push({ type: 'genre', id: l.id, name: hit.name })
+          }
+        }
+        updateLikesMeta(likePatches)
+      }
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiLang])
 
   const tabs = [
     { id: 'watched', label: t('library.watched'), count: watched.length },

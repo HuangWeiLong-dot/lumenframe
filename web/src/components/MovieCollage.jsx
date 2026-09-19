@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTrending } from '../hooks/useTrending'
 import { posterUrl } from '../api'
 import StatusBadge from './StatusBadge'
@@ -66,6 +66,16 @@ function pack(movies, cols, chunks) {
   return items
 }
 
+// 占位网格的条数。TMDB trending 默认返回 20 条，用同一个数字跑 pack()，
+// 只要实际条数一致，占位与实际网格的行数（=高度）就逐格相同，数据到达时零位移。
+const EXPECTED_TRENDING = 20
+const PLACEHOLDERS = Array.from({ length: EXPECTED_TRENDING }, (_, i) => ({ id: `__ph${i}` }))
+
+// 海报候选尺寸。网格列宽是 JS 算出的精确像素值，sizes 可以直接给准确宽度，
+// 让浏览器按 实际渲染宽 × DPR 选最小够用的一档 —— 原先固定 w342，
+// 在 1x 屏和窄列上都明显超配（Lighthouse「Improve image delivery」）。
+const POSTER_SIZES = ['w185', 'w342', 'w500']
+
 export default function MovieCollage() {
   const { t } = useI18n()
   const trending = useTrending()
@@ -103,12 +113,33 @@ export default function MovieCollage() {
     }
   }, [trending.length])
 
-  const items = useMemo(() => {
+  const realItems = useMemo(() => {
     const withPoster = trending.filter((m) => m.poster_path)
     // 只排完整 bands：chunks = floor(n / cols)，保证最后一行也被填满
     const chunks = Math.max(1, Math.floor(withPoster.length / cols))
     return pack(withPoster, cols, chunks)
   }, [trending, cols])
+
+  // 数据未到时用同等高占位撑住高度。原先 items 为空就整个不渲染，容器高度为 0，
+  // /api/trending 一到展开成整片网格把页脚顶下去 —— Lighthouse 实测的 CLS 0.166
+  // 全部来自 footer 这一次位移。占位与实际网格同为 chunks 个 band，高度一致。
+  const placeholderItems = useMemo(
+    () => pack(PLACEHOLDERS, cols, Math.max(1, Math.floor(EXPECTED_TRENDING / cols))),
+    [cols]
+  )
+
+  const loading = realItems.length === 0
+  const items = loading ? placeholderItems : realItems
+
+  // 占位只在"确实还在等数据"时显示。加超时兜底：/api/trending 失败时 useTrending
+  // 返回空数组且不写缓存，若一直挂着骨架就成了一片永久灰格，比原先什么都不渲染更糟。
+  const [placeholderExpired, setPlaceholderExpired] = useState(false)
+  useEffect(() => {
+    if (!loading) return
+    const timer = setTimeout(() => setPlaceholderExpired(true), 8000)
+    return () => clearTimeout(timer)
+  }, [loading])
+  const showGrid = totalW != null && items.length > 0 && (!loading || !placeholderExpired)
 
   // 注意：外层容器必须始终挂载——测量 effect 只跑一次，
   // 若数据未到时 return null，ref 为空会导致 ResizeObserver 永不初始化（冷加载必现）。
@@ -117,7 +148,7 @@ export default function MovieCollage() {
 
   return (
     <div className="mt-12 pb-1" ref={wrapRef}>
-      {items.length > 0 && (
+      {showGrid && (
         <div className="mx-auto" style={{ width: totalW }}>
           <p className="mb-4 text-xs uppercase tracking-[0.3em] text-zinc-700">{t('collage.title')}</p>
           <div
@@ -128,37 +159,58 @@ export default function MovieCollage() {
               gap: GAP,
             }}
           >
-            {items.map(({ m, col, row, cs, rs }) => (
-              <NavLink
-                key={m.id}
-                to={titleUrl(m.kind || 'movie', m.id, m.title)}
-                className="group relative overflow-hidden bg-zinc-100 text-left transition"
-                style={{
-                  gridColumn: `${col} / span ${cs}`,
-                  gridRow: `${row} / span ${rs}`,
-                  // 跨 2×2 格的格子本身是 1.48（gap 不可约），上下各侵入 gutter 2px，
-                  // 可见盒子即严格 2:3；8px gap 仍余 6px，首尾行外扩 2px 落在相邻留白内。
-                  ...(cs === 2 ? { margin: '-2px 0' } : null),
-                }}
-              >
-                <img
-                  src={posterUrl(m.poster_path, 'w342')}
-                  alt={m.title}
-                  loading="lazy"
-                  decoding="async"
-                  crossOrigin="anonymous"
-                  className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                />
-                <StatusBadge kind={m.kind || 'movie'} id={m.id} size="md" />
-                {/* 悬浮片名条 */}
-                <span
-                  className="pointer-events-none absolute inset-x-0 bottom-0 p-2 pt-8 text-xs font-medium leading-tight text-white opacity-0 transition duration-200 group-hover:opacity-100"
-                  style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.82), rgba(0,0,0,0))' }}
+            {items.map(({ m, col, row, cs, rs }, i) => {
+              // 跨 2×2 格的格子本身是 1.48（gap 不可约），上下各侵入 gutter 2px，
+              // 可见盒子即严格 2:3；8px gap 仍余 6px，首尾行外扩 2px 落在相邻留白内。
+              const cellStyle = {
+                gridColumn: `${col} / span ${cs}`,
+                gridRow: `${row} / span ${rs}`,
+                ...(cs === 2 ? { margin: '-2px 0' } : null),
+              }
+
+              // 加载中：同尺寸同位置的惰性格子，撑住高度（消 CLS），不放任何可交互内容
+              if (loading) {
+                return <div key={m.id} className="bg-zinc-100" style={cellStyle} />
+              }
+
+              // sizes 用网格实际列宽（cs=2 的格子跨两列加一个 gap），
+              // 浏览器据此按 宽度×DPR 选最小够用的一档，不再一律拉 w342
+              const slotW = cs === 2 ? colW * 2 + GAP : colW
+
+              return (
+                <NavLink
+                  key={m.id}
+                  to={titleUrl(m.kind || 'movie', m.id, m.title)}
+                  className="group relative overflow-hidden bg-zinc-100 text-left transition"
+                  style={cellStyle}
                 >
-                  {m.title}
-                </span>
-              </NavLink>
-            ))}
+                  <img
+                    src={posterUrl(m.poster_path, 'w342')}
+                    srcSet={POSTER_SIZES.map(
+                      (s) => `${posterUrl(m.poster_path, s)} ${s.slice(1)}w`
+                    ).join(', ')}
+                    sizes={`${Math.round(slotW)}px`}
+                    alt={m.title}
+                    // 首屏 band 不 lazy、首图 fetchpriority=high：
+                    // LCP 元素就是这里的海报，Lighthouse「LCP request discovery」三项失败之二。
+                    // 其余保持 lazy，视口外的图不请求。
+                    loading={row === 1 ? 'eager' : 'lazy'}
+                    fetchPriority={i === 0 ? 'high' : undefined}
+                    decoding="async"
+                    crossOrigin="anonymous"
+                    className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                  />
+                  <StatusBadge kind={m.kind || 'movie'} id={m.id} size="md" />
+                  {/* 悬浮片名条 */}
+                  <span
+                    className="pointer-events-none absolute inset-x-0 bottom-0 p-2 pt-8 text-xs font-medium leading-tight text-white opacity-0 transition duration-200 group-hover:opacity-100"
+                    style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.82), rgba(0,0,0,0))' }}
+                  >
+                    {m.title}
+                  </span>
+                </NavLink>
+              )
+            })}
           </div>
         </div>
       )}

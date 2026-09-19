@@ -4,9 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LUMENFRAME - EVERY FRAME TELLS A STORY</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <!-- 静态 meta description。这是 SPA，没有 SSR/预渲染，所以只能是全站一句 ——
+         写死英文是与 <html lang="en"> 保持一致。若以后要做多语言 SEO，
+         得先上预渲染，单靠这份静态 HTML 换不了语言。 -->
+    <meta
+      name="description"
+      content="LUMENFRAME — every frame tells a story. Film and TV details: ratings, cinematography specs, streaming availability, subtitles, stills and poster cards."
+    />
     <script>
       // 与 public/404.html 配套：GitHub Pages 遇到未知路径（/movie/...、/library 等）
       // 会把我们送进 404.html，404.html 把完整原始路径编码到 _spa 再跳回根。
@@ -22,6 +26,9 @@
       })()
     </script>
     <script defer src="https://cloud.umami.is/script.js" data-website-id="4771ac2d-0f37-49c9-a602-a5e0e25f0c6d"></script>
+    <!-- 首页数据预取脚本（预连接 API 域 + 提前发起 /api/trending）由
+         vite.config.js 的 homePrefetch 插件在构建期注入到这里，
+         它用的是构建期的 VITE_API_BASE，所以不能写死在源码里。 -->
   </head>
   <!-- 内联样式只负责首屏底色/文字色防闪烁；字体栈统一由 src/index.css 定义 -->
   <body style="background:#fff;color:#141414">
