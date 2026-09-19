@@ -518,6 +518,23 @@ app.get('/api/genre/:kind/:id', async (req, res) => {
   }
 })
 
+// 类型名录（本地化 id → 名称）：观影库「喜欢」里的类型条目只有 id，
+// 切换语言后要用当前语言的名称回填，本接口即该映射的唯一来源（按语言缓存）。
+app.get('/api/genres', async (req, res) => {
+  const lang = reqLang(req)
+  try {
+    const [mv, tv] = await Promise.all([
+      cached(lk('genres:movie', lang), () => tmdb('/genre/movie/list', {}, lang)),
+      cached(lk('genres:tv', lang), () => tmdb('/genre/tv/list', {}, lang)),
+    ])
+    const pick = (data) =>
+      (data.genres || []).map((g) => ({ id: g.id, name: g.name }))
+    res.json({ movie: pick(mv), tv: pick(tv) })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
 // 第三方评分：OMDB API（IMDb / Rotten Tomatoes / Metacritic），懒加载，成功后文件缓存
 // RT 页面抓取只认英文片名：中文界面传进来的中文片名会先用 IMDb id 反查英文名
 app.get('/api/ratings/:imdbId', async (req, res) => {

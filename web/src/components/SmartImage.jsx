@@ -3,7 +3,6 @@ import { acquireSlot } from '../imageQueue'
 import { tRaw as t } from '../i18n'
 
 // 通用图片组件：
-// - 全局并发限流，排队中显示骨架屏
 // - 加载中显示 shimmer 骨架屏
 // - 加载失败显示 "No poster" 占位
 // - loading="lazy" 让视口外图片不请求
@@ -30,7 +29,7 @@ const SmartImage = memo(function SmartImage({
   const cancelledRef = useRef(false)
   const timeoutRef = useRef(null)
 
-  // src 变化 → 重置状态，排队请求加载
+  // src 变化 → 重置状态并加载
   useEffect(() => {
     cancelledRef.current = false
 
@@ -79,7 +78,7 @@ const SmartImage = memo(function SmartImage({
     }
   }, [src])
 
-  // 重试时重新排队（带退避延迟）
+  // 重试（带退避延迟）
   useEffect(() => {
     if (retry === 0) return
     cancelledRef.current = false

@@ -122,6 +122,11 @@ export default function QuizRecommender() {
 
   const poster = result ? posterFor(result, 'w342') : ''
 
+  // 本区块的标题（CollapsibleSection 的 title）渲染成 <button> 里的 <span>，不是标题元素，
+  // 所以里面每个步骤的问句就是首页上该区块的顶层标题 —— 用 <h2> 而非 <h3>。
+  // 首页的标题序列是 <h1>LUMENFRAME</h1> → 这里的问句，写成 h3 会跨过 h2 一级，
+  // 触发 Lighthouse 的「Heading elements are not in a sequentially-descending order」。
+  // 四步互斥渲染，任一步骤下本区块都恰好只有一个 h2。
   return (
     <CollapsibleSection title={t('quiz.surpriseMe')} defaultOpen>
       <div className="space-y-5">
@@ -130,9 +135,9 @@ export default function QuizRecommender() {
         {/* Step 0: 类型 — 卡片式选择 */}
         {step === 0 && (
           <div>
-            <h3 className="mb-4 text-base font-bold text-zinc-900">
+            <h2 className="mb-4 text-base font-bold text-zinc-900">
               {t('quiz.mood')}
-            </h3>
+            </h2>
             <div className="grid grid-cols-2 gap-3">
               {[
                 { key: 'movie', label: t('quiz.movie'), desc: t('quiz.movieDesc') },
@@ -175,7 +180,7 @@ export default function QuizRecommender() {
         {/* Step 1: 年代 */}
         {step === 1 && (
           <div>
-            <h3 className="mb-4 text-base font-bold text-zinc-900">{t('quiz.era')}</h3>
+            <h2 className="mb-4 text-base font-bold text-zinc-900">{t('quiz.era')}</h2>
             <div className="flex flex-wrap gap-2">
               {DECADES.map((d) => (
                 <Chip key={d} active={decade === d} onClick={() => setDecade(d)}>
@@ -205,7 +210,7 @@ export default function QuizRecommender() {
         {/* Step 2: 类别 */}
         {step === 2 && (
           <div>
-            <h3 className="mb-1 text-base font-bold text-zinc-900">{t('quiz.genres')}</h3>
+            <h2 className="mb-1 text-base font-bold text-zinc-900">{t('quiz.genres')}</h2>
             <p className="mb-4 text-xs text-zinc-500">{t('quiz.genresOptional')}</p>
             <div className="flex flex-wrap gap-2">
               {genreList.map((g) => (
@@ -256,9 +261,9 @@ export default function QuizRecommender() {
                   {result.kind === 'tv' ? t('quiz.tvShow') : t('quiz.movie')}
                   {decade !== 'any' && ` · ${decade}`}
                 </p>
-                <h3 className="mt-1 text-xl font-extrabold leading-tight text-zinc-900">
+                <h2 className="mt-1 text-xl font-extrabold leading-tight text-zinc-900">
                   {result.title}
-                </h3>
+                </h2>
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-2 text-sm text-zinc-600 sm:justify-start">
                   <span>{result.year}</span>
                   {typeof result.rating === 'number' && (

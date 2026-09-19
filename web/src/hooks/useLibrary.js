@@ -221,21 +221,75 @@ export function useLibrary() {
     })
   }, [cache])
 
-  // 语言切换后回填本地化标题（本地存的是加入时的语言；标题未变则不写入、不触发渲染）
-  const updateTitle = useCallback((kind, id, title) => {
-    if (!title) return
+  // 语言切换后回填本地化元信息（标题 / 类型名 / 海报等）。
+  // patch 字段可选：只覆盖传入的字段，未变则不写入、不触发渲染。
+  // 本地存的是加入时的语言快照，切换后由上层（详情页 / 观影库页）回填当前语言版本。
+  const updateEntryMeta = useCallback((kind, id, patch) => {
+    if (!patch || typeof patch !== 'object') return
     const key = entryKey(kind, id)
-    const patch = (list) => {
+    const applyPatch = (list) => {
       let changed = false
       const next = list.map((m) => {
-        if (entryKey(m.kind, m.id) !== key || m.title === title) return m
-        changed = true
-        return { ...m, title }
+        if (entryKey(m.kind, m.id) !== key) return m
+        let cur = m
+        if (patch.title != null && m.title !== patch.title) cur = { ...cur, title: patch.title }
+        if (Array.isArray(patch.genres) && JSON.stringify(m.genres) !== JSON.stringify(patch.genres)) {
+          cur = { ...cur, genres: patch.genres }
+        }
+        if (patch.poster_path != null && m.poster_path !== patch.poster_path) {
+          cur = { ...cur, poster_path: patch.poster_path }
+        }
+        if (cur !== m) changed = true
+        return cur
       })
       return changed ? next : null
     }
-    const watched = patch(cache.watched)
-    const watchlater = patch(cache.watchlater)
+    const watched = applyPatch(cache.watched)
+    const watchlater = applyPatch(cache.watchlater)
+    if (!watched && !watchlater) return
+    write({
+      ...cache,
+      watched: watched || cache.watched,
+      watchlater: watchlater || cache.watchlater,
+    })
+  }, [cache])
+
+  // 语言切换后批量回填本地化元信息：整批一次 write，
+  // 少一次通知，也不会短暂暴露「一半条目已更新」的中间态
+  const updateEntriesMeta = useCallback((updates) => {
+    if (!Array.isArray(updates) || updates.length === 0) return
+    // 按 key 合并所有 patch；同 key 多次出现时后者覆盖前者
+    const patches = new Map()
+    for (const u of updates) {
+      if (!u || typeof u !== 'object' || u.id == null) continue
+      const key = entryKey(u.kind, u.id)
+      patches.set(key, {
+        title: u.title != null ? u.title : undefined,
+        genres: Array.isArray(u.genres) ? u.genres : undefined,
+        poster_path: u.poster_path != null ? u.poster_path : undefined,
+      })
+    }
+    if (patches.size === 0) return
+    const applyPatches = (list) => {
+      let changed = false
+      const next = list.map((m) => {
+        const patch = patches.get(entryKey(m.kind, m.id))
+        if (!patch) return m
+        let cur = m
+        if (patch.title !== undefined && m.title !== patch.title) cur = { ...cur, title: patch.title }
+        if (patch.genres !== undefined && JSON.stringify(m.genres) !== JSON.stringify(patch.genres)) {
+          cur = { ...cur, genres: patch.genres }
+        }
+        if (patch.poster_path !== undefined && m.poster_path !== patch.poster_path) {
+          cur = { ...cur, poster_path: patch.poster_path }
+        }
+        if (cur !== m) changed = true
+        return cur
+      })
+      return changed ? next : null
+    }
+    const watched = applyPatches(cache.watched)
+    const watchlater = applyPatches(cache.watchlater)
     if (!watched && !watchlater) return
     write({
       ...cache,
@@ -344,6 +398,35 @@ export function useLibrary() {
     [cache]
   )
 
+  // 语言切换后批量回填点赞条目的本地化名称 / 海报（标题类点赞存的是当初点赞时的语言）。
+  // 传入项形如 { type, id, name?, poster? }；未变则不写入，整批一次 write。
+  const updateLikesMeta = useCallback((updates) => {
+    if (!Array.isArray(updates) || updates.length === 0) return
+    const patches = new Map()
+    for (const u of updates) {
+      if (!u || u.id == null || !u.type) continue
+      const prev = patches.get(likeKey(u.type, u.id)) || {}
+      patches.set(likeKey(u.type, u.id), {
+        name: u.name != null ? u.name : prev.name,
+        poster: u.poster != null ? u.poster : prev.poster,
+      })
+    }
+    if (patches.size === 0) return
+    const likes = cache.likes || []
+    let changed = false
+    const next = likes.map((l) => {
+      const patch = patches.get(likeKey(l.type, l.id))
+      if (!patch) return l
+      let cur = l
+      if (patch.name !== undefined && l.name !== patch.name) cur = { ...cur, name: patch.name }
+      if (patch.poster !== undefined && l.poster !== patch.poster) cur = { ...cur, poster: patch.poster }
+      if (cur !== l) changed = true
+      return cur
+    })
+    if (!changed) return
+    write({ ...cache, likes: next })
+  }, [cache])
+
   return {
     watched: store.watched,
     watchlater: store.watchlater,
@@ -356,13 +439,15 @@ export function useLibrary() {
     isInWatchLater,
     updateMyRating,
     updateRatings,
-    updateTitle,
+    updateEntryMeta,
+    updateEntriesMeta,
     refreshAllRatings,
     getNote,
     setNote,
     toggleLike,
     removeFromLikes,
     isInLikes,
+    updateLikesMeta,
   }
 }
 

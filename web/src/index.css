@@ -6,8 +6,18 @@
    真正的 500/600 —— 于是同一行中西文粗细不一致。Noto Sans SC 是 100-900 可变字重，
    能让中文拿到与英文相同的字重。末尾的系统字体仅作 webfont 未就绪时的兜底。 */
 @theme {
-  --font-sans: 'Inter', 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont,
+  --font-sans: 'Inter Variable', 'Noto Sans SC Variable', -apple-system, BlinkMacSystemFont,
     'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+/* 语言选择弹窗的中文预览专用：跳过自托管中文可变字体，直接用系统字体。
+   该弹窗首屏必现，其中的「中文」「以简体中文浏览影片…」是英文首页唯一的汉字来源——
+   实测仅此一句就会拉下 7 个 Noto Sans SC 分片、约 380 KiB。
+   这里只用 400/700 两档，正是系统中文字体自带的字重，不存在上面记的
+   「500/600 被吸附成 700」问题（弹窗里是 font-bold 和默认字重）。
+   这是全项目唯一该用系统中文字体的地方，其余地方仍然必须走 --font-sans。 */
+.font-system-cjk {
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
 /* 防止任何全宽元素（如 100vw）撑出横向滚动条。

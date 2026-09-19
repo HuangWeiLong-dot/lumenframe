@@ -64,6 +64,12 @@ export default function LanguagePicker() {
         <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2 sm:gap-3 sm:p-6">
           {options.map(({ code, label, desc }) => {
             const isRec = code === recommended
+            // 中文选项的文字直接用系统字体（见 index.css 的 .font-system-cjk）。
+            // 这个弹窗首屏必现，而英文界面下它是页面上唯一的汉字来源 ——
+            // 实测仅「中文」+ 那句描述就会拉下 7 个 Noto Sans SC 分片、约 380 KiB。
+            // 只作用于中文项：英文项在界面切到中文时也含汉字，但那时全站已是中文，
+            // 自托管中文字体本来就要加载，没必要（也不该）换成系统字体。
+            const cjkFont = code === 'zh' ? 'font-system-cjk' : ''
             return (
               <button
                 key={code}
@@ -74,14 +80,14 @@ export default function LanguagePicker() {
               >
                 {/* 角标紧贴语言名（不 justify-between）：首行 min-h 固定，两张卡片的描述文字才会对齐 */}
                 <span className="flex min-h-[15px] items-center gap-2">
-                  <span className="truncate text-sm font-bold uppercase tracking-[0.2em] text-black">{label}</span>
+                  <span className={`truncate text-sm font-bold uppercase tracking-[0.2em] text-black ${cjkFont}`}>{label}</span>
                   {isRec && (
                     <span className="shrink-0 whitespace-nowrap border border-zinc-300 px-1.5 py-0.5 text-[9px] font-semibold uppercase leading-none tracking-[0.12em] text-zinc-500">
                       {t('langModal.recommended')}
                     </span>
                   )}
                 </span>
-                <span className="mt-2 text-[11px] leading-relaxed text-zinc-500">{desc}</span>
+                <span className={`mt-2 text-[11px] leading-relaxed text-zinc-500 ${cjkFont}`}>{desc}</span>
               </button>
             )
           })}
