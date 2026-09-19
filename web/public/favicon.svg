@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="LUMENFRAME">
+  <!-- 方块取景框：黑底 + 白色方框，与站点「纯黑白、直角、无圆角」的取向一致。
+       16px 下只剩一个框，所以描边给到 3px，别再细。 -->
+  <rect width="32" height="32" fill="#000"/>
+  <rect x="8.5" y="8.5" width="15" height="15" fill="none" stroke="#fff" stroke-width="3"/>
+</svg>

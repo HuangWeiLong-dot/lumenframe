@@ -46,6 +46,31 @@ function Chip({ active, onClick, children }) {
   )
 }
 
+// 箭头画成内联 SVG，不再写「→ / ←」字形。
+// U+2192 落在 Noto Sans SC 的 subset 109、U+2190 落在 subset 105，而 Inter 两个都没有 ——
+// 浏览器会为了这一枚箭头去下一个 59 KiB 的中文字体分片。首页的 step 0 是默认展开状态
+// （CollapsibleSection defaultOpen），所以那个「Continue →」是首屏必经之路，实测确实触发了。
+function Arrow({ dir = 'right' }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      className="h-3 w-3 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {dir === 'right' ? (
+        <path d="M3 8h9.5M8.5 4.5L12 8l-3.5 3.5" />
+      ) : (
+        <path d="M13 8H3.5M7.5 4.5L4 8l3.5 3.5" />
+      )}
+    </svg>
+  )
+}
+
 function StepIndicator({ current }) {
   return (
     <div className="mb-5 flex items-center gap-2">
@@ -169,9 +194,10 @@ export default function QuizRecommender() {
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
+                className="inline-flex items-center gap-1.5 bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
               >
                 {t('quiz.continue')}
+                <Arrow />
               </button>
             </div>
           </div>
@@ -192,16 +218,18 @@ export default function QuizRecommender() {
               <button
                 type="button"
                 onClick={() => setStep(0)}
-                className="text-xs font-medium text-zinc-500 transition hover:text-black"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition hover:text-black"
               >
+                <Arrow dir="left" />
                 {t('quiz.back')}
               </button>
               <button
                 type="button"
                 onClick={() => setStep(2)}
-                className="bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
+                className="inline-flex items-center gap-1.5 bg-black px-5 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800"
               >
                 {t('quiz.continue')}
+                <Arrow />
               </button>
             </div>
           </div>

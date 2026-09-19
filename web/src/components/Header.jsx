@@ -167,6 +167,9 @@ export default function Header({ onHome, onLibrary }) {
           <div className="flex items-center justify-between px-4 py-3 text-sm text-black">
             <span>{t('header.language')}</span>
             <div className="flex items-center gap-1">
+              {/* zh 那一格显示「中」：同右下角悬浮按钮，换系统字体（见其注释）。
+                  只作用于非 en 项——en 项是纯 ASCII，换成系统字体只会让 Inter 的字距变样；
+                  字重也在这里显式给 700，不继承按钮的 font-semibold(600)（见 index.css）。 */}
               {['en', 'zh'].map((code) => (
                 <button
                   key={code}
@@ -179,7 +182,9 @@ export default function Header({ onHome, onLibrary }) {
                       : 'border-zinc-300 text-zinc-600 hover:border-zinc-500 hover:text-black'
                   }`}
                 >
-                  {code === 'en' ? t('lang.en') : t('lang.zh')}
+                  <span className={code === 'en' ? '' : 'font-system-cjk font-bold'}>
+                    {code === 'en' ? t('lang.en') : t('lang.zh')}
+                  </span>
                 </button>
               ))}
             </div>
@@ -243,7 +248,13 @@ export default function Header({ onHome, onLibrary }) {
         aria-label={t('header.switchLang')}
         className="fixed bottom-5 right-5 z-[1000] hidden h-10 w-10 items-center justify-center border border-zinc-300 bg-white/80 text-xs font-semibold uppercase tracking-wider text-zinc-700 shadow-lg backdrop-blur-md transition hover:bg-white hover:text-black sm:flex"
       >
-        {lang === 'en' ? t('lang.zh') : t('lang.en')}
+        {/* 英文界面下这个按钮显示「中」——全站唯一的汉字，且不在 LanguagePicker 的
+            .font-system-cjk 覆盖范围内。字面量 '中' 落在 Noto Sans SC 的 subset 119 里，
+            仅此一个字形就会在首屏拉下 75.3 KiB 字体，和 LCP 海报抢带宽。
+            与弹窗同一套理由换系统字体；切到中文界面后这里是 'EN'，不需要该字体。 */}
+        <span className={lang === 'en' ? 'font-system-cjk font-bold' : ''}>
+          {lang === 'en' ? t('lang.zh') : t('lang.en')}
+        </span>
       </button>
 
       {/* 账号弹窗放在触发按钮所在的组件里，两者不会各自漂移 */}
