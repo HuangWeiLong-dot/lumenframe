@@ -6,6 +6,7 @@ import FilmGrabShots from './components/FilmGrabShots'
 import TrailerSection from './components/TrailerSection'
 import WhereToWatch from './components/WhereToWatch'
 import Torrents from './components/Torrents'
+import PlaySources from './components/PlaySources'
 import TasteDiveSimilar from './components/TasteDiveSimilar'
 import AlsoLiked from './components/AlsoLiked'
 import SmartImage from './components/SmartImage'
@@ -490,8 +491,9 @@ export default function App() {
     setPosters([])
     try {
       const endpoint = kind === 'tv' ? `/api/tv/${id}` : `/api/movie/${id}`
-      // 电影走可本地化接口；剧集来自 TVmaze（无中文），保持原样
-      const res = await fetch(kind === 'tv' ? apiUrl(endpoint) : apiUrlWithLang(endpoint))
+      // 电影与剧集都是可本地化接口：剧集的载荷本体来自 TVmaze（英文），
+      // 后端在 ?lang= 下把 TMDB 的中文片名/简介/类型叠上去（server/tvmeta.js）
+      const res = await fetch(apiUrlWithLang(endpoint))
       if (token !== reqTokenRef.current) return
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || `Failed to load ${kind === 'tv' ? 'show' : 'movie'}`)
@@ -653,13 +655,15 @@ export default function App() {
     openGenre(kind, id, name)
   }
 
-  // 语言切换：当前电影详情页立即用新语言重拉（剧集来自 TVmaze，无中文，跳过）
+  // 语言切换：当前详情页立即用新语言重拉。
+  // 电影和剧集都要 —— 剧集的载荷虽然来自 TVmaze，中文片名/简介/类型是后端从 TMDB
+  // 叠上去的（server/tvmeta.js），不重拉就一直是上一个语言的。
   const prevApiLangRef = useRef(apiLang)
   useEffect(() => {
     if (prevApiLangRef.current === apiLang) return
     prevApiLangRef.current = apiLang
-    if (view === 'movie' && movie && movie.kind !== 'tv') {
-      openTitle('movie', movie.id, { history: 'none', scroll: false })
+    if (view === 'movie' && movie) {
+      openTitle(movie.kind === 'tv' ? 'tv' : 'movie', movie.id, { history: 'none', scroll: false })
     }
     // 仅在语言变化时触发；openTitle 每次渲染都是新引用，不能进依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1542,6 +1546,10 @@ export default function App() {
 
       {movie && !detailLoading && (
         <Torrents key={`torrents-${movie.id}`} movie={movie} />
+      )}
+
+      {movie && !detailLoading && (
+        <PlaySources key={`play-${movie.kind}-${movie.id}`} movie={movie} />
       )}
 
       {movie && !detailLoading && movie.kind !== 'tv' && (

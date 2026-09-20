@@ -66,11 +66,11 @@ function bestImage(s) {
   return s.image?.original || s.image?.medium || null
 }
 
-// 剧集搜索：/search/shows?q=
-export async function searchShows(q) {
-  const data = await tvmaze(`/search/shows?q=${encodeURIComponent(q)}`)
-  if (!data) return []
-  return data.map(({ show: s }) => ({
+// 搜索结果里的剧集条目形状（TVmaze 原始 show 对象 → 前端载荷）。
+// 单独导出是因为中文本地化（tvmeta.js）要先把原始对象里的 externals 取走，
+// 再拿这个形状去叠加 —— 拆开写两边都不用重复一遍字段映射。
+export function showSummary(s) {
+  return {
     kind: 'tv',
     id: s.id,
     title: s.name,
@@ -79,7 +79,17 @@ export async function searchShows(q) {
     overview: stripHtml(s.summary),
     genres: s.genres || [],
     tvPoster: bestImage(s),
-  }))
+  }
+}
+
+// 剧集搜索：/search/shows?q=（原始条目，含 externals，供 tvmeta 用）
+export async function searchShowsRaw(q) {
+  const data = await tvmaze(`/search/shows?q=${encodeURIComponent(q)}`)
+  return data || []
+}
+
+export async function searchShows(q) {
+  return (await searchShowsRaw(q)).map(({ show: s }) => showSummary(s))
 }
 
 // 剧集详情：内嵌 cast / seasons / episodes（一次性拿全，服务端有缓存）
@@ -131,7 +141,10 @@ export async function getShow(id) {
     network: networkName(s),
     overview: stripHtml(s.summary),
     tvPoster: bestImage(s),
+    // 外部 id 是剧集中文元数据（tvmeta.js）的入口：IMDb 优先、TheTVDB 兜底。
+    // 少了这两条就只能按片名去 TMDB 猜，同名剧集会挑错。
     imdb_id: s.externals?.imdb || null,
+    tvdb_id: s.externals?.thetvdb || null,
     tvmaze_url: s.url || `https://www.tvmaze.com/shows/${s.id}`,
     seasonsCount: seasons.length,
     episodesCount: episodes.length,

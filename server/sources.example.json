@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "在线播放源清单样例。把它复制成同目录的 sources.json 再填自己的清单 ——",
+    "sources.json 是 gitignored 的，不会进仓库，也能扛住部署脚本的 git reset --hard。",
+    "文件缺失或数组为空 = 功能未启用，前端区块自动隐藏。",
+    "",
+    "kind 五种取值：",
+    "  cms    —— 苹果CMS(MacCMS)采集站，填 api 指向 /api.php/provide/vod/",
+    "  config —— TVBox 多仓/单仓配置，填 url；服务端会展开出里面 sites[].api",
+    "  parse  —— 解析接口，填 tpl，用 {url} 占位（服务端会 URL 编码后替换）",
+    "  direct —— 直连片源，一条 entries[]，每项按片绑定一条 m3u8/mp4 地址",
+    "  nb     —— 4kvms，**不需要填任何地址**，只要写下这一条来开关",
+    "",
+    "id 可省略，默认由 host 推导（config / direct 类会带上路径片段）。",
+    "同一 host 只保留第一次出现的条目：采集站按 host 去重（/from/xxx 是过滤变体），",
+    "配置源按整个 URL 去重（同 host 的不同路径是不同仓）。所以通用的写在前面。",
+    "",
+    "关于 nb：站点地址是**内建**的 —— 整套抓取（搜索页 / 播放页 / WASM 签名）都是照",
+    "4kvms 一个站写的，换不了别的站，所以这一条只用来开关和命名，填别的字段无效。",
+    "它要求 server/vendor/nbmovie/ 下那两个文件在位（gitignore 的，得手工放），",
+    "缺失时这一条会被静默忽略 —— 与 sources.json 缺失时整个功能自隐藏是同一套约定。",
+    "详见 server/vendor/nbmovie/README.md。",
+    "",
+    "关于 direct：它**不参与搜索，也不进探活** —— 详情页直接拿这一条当「主源」置顶。",
+    "用途是那些抓不到、也搜不到的源。4kvms 那种 WASM 签名站原本正是靠它顶着的，",
+    "现在走 nb 就能按片名搜了；direct 留给「只想要这一部片、只认这一个地址」的场合。",
+    "每项 tmdb 与 title 至少给一个，两个都写时 tmdb 优先。",
+    "  tmdb  —— 数字 TMDB id，只对**电影**有效（详情页路由就是 /movie/{tmdbId}）。",
+    "           剧集的数据来自 TVmaze，前端手上那个数字不是 TMDB id，所以剧集请走 title。",
+    "  title —— 片名兜底，与详情页的中英文片名逐字比对（大小写无关），不是模糊匹配。",
+    "label 是卡片上显示的线路名，可省略（省略时显示「直连片源」）。"
+  ],
+  "sources": [
+    { "name": "某采集站", "kind": "cms", "api": "https://example.com/api.php/provide/vod/" },
+    { "name": "某单仓配置", "kind": "config", "url": "https://example.com/config.json" },
+    { "name": "某解析", "kind": "parse", "tpl": "https://jx.example.com/?url={url}" },
+    { "name": "4kvms", "kind": "nb" },
+    {
+      "name": "直连片源",
+      "kind": "direct",
+      "entries": [
+        {
+          "tmdb": "157336",
+          "title": "星际穿越",
+          "label": "4K 直连",
+          "url": "https://example.com/abc.m3u8"
+        }
+      ]
+    }
+  ]
+}

@@ -311,6 +311,73 @@ export default {
   'torrents.magnetUnavailable': '暂无磁力链接，请打开详情页',
   'torrents.openSource': '打开源页面',
 
+  // ---- 在线播放源（采集站） ----
+  'play.title': '在线播放',
+  // 口令门（PlayGate.jsx）。只有构建时配了 VITE_PLAY_PASSWORD 才存在这道门；
+  // 没配的话这些文案一条都不会出现。{email} 是管理员邮箱，见 PlayGate 的 PLAY_CONTACT。
+  'play.gateLocked': '这一块需要口令',
+  'play.gateLockedBody': '在线播放不对外开放，口令由站点管理员发放。',
+  'play.gateOpen': '输入口令',
+  'play.gateTitle': '输入在线播放口令',
+  'play.gateBody': '口令由站点管理员发放。输入一次后，这个浏览器会一直记着。',
+  'play.gateLabel': '口令',
+  'play.gateWrong': '口令不对，请重新输入。',
+  'play.gateSubmit': '解锁',
+  'play.gateContact': '还没有口令？联系管理员 {email}',
+  'play.directBadge': '主源',
+  'play.directSource': '直连片源',
+  'play.searching': '正在搜索采集站…',
+  'play.noResults': '未找到该片的播放源。',
+  'play.noResultsDirect': '采集站里没搜到 —— 上面那条主源已经备好了。',
+  'play.unavailable': '在线播放源服务不可用。',
+  // 这一块没有常驻按钮了（展开就搜、探活自动补），只在空态/出错时给一个「再来一次」
+  'play.retry': '重新搜索',
+  // 线路的叫法：采集站那边是「ffm3u8」「量子」这类站内代号，读不出也记不住，
+  // 按序号叫「线路一、线路二」；原始代号留在按钮的 title 里（见 playMedia.js 的 cnNumber）。
+  // {cn} 是中文数字，英文界面用不到（这一块只在中文界面开放）。
+  'play.line': '线路{cn}',
+  // 来源编号：同一条来源在整列结果里是同一个号（见 PlaySources 的 sourceNo）。
+  // 它取代了服务端那个 5 位哈希化名 —— 化名读不出来也记不住，而它唯一的用途
+  // 只是「在这一列里指认一行」，一个序号就够了。
+  'play.sourceNo': '来源 {n}',
+  // 说明块：属于整个区块，不跟播放器绑一起。**只有一句** —— 这是没人会重读的免责声明，
+  // 「不存储」和「不中转」讲的是同一件事（手里既没有原件也没经手），合起来照样把话说清。
+  'play.notice': '播放的是第三方采集站与 CDN 直出的流，本站不存储、不中转；卡顿、断流、失效都是常事。',
+  // 「该源没有返回剧集列表」不再是一条文案：这种源展开后整张卡片直接退场
+  // （见 PlaySources 的 onEmpty），不给用户留一句「白点了」的话。
+  'play.loadingDetail': '正在加载剧集…',
+  // 铺开那一轮（冷搜之后自动补的探活 + 重搜）的进度。它没有按钮：自动发生的事，
+  // 摆个控件只会让用户以为得点一下。耗时按服务端预算写（探活 12s + 配置展开 12s）。
+  'play.probeRunning': '正在检测更多来源…大约需要 15~25 秒。',
+  'play.play': '播放',
+  // 播放台常驻在区块底部，空闲时靠这句邀请语教用法
+  'play.stage': '播放台',
+  'play.stageIdle': '选一集，就会在这里播放。',
+  // 卡片里三个分组的小标题：季是「看哪一季」（只有主源卡会有，且多于一条时才有），
+  // 线路是「换哪条」，剧集是「看哪一集」
+  'play.seasons': '季',
+  'play.lines': '线路',
+  'play.episodes': '剧集',
+  // ---- 自绘播放器的控件（不用原生 controls，所以每个按钮都要有自己的名字） ----
+  'play.playerClose': '关闭',
+  'play.playerLoading': '正在加载播放流…',
+  'play.buffering': '缓冲中…',
+  'play.playerFallback': '打不开？交给本地播放器',
+  'play.playerRetry': '重试',
+  'play.togglePlay': '播放 / 暂停',
+  'play.pause': '暂停',
+  'play.seek': '播放进度',
+  'play.mute': '静音',
+  'play.unmute': '取消静音',
+  'play.volume': '音量',
+  'play.enterFullscreen': '全屏',
+  'play.exitFullscreen': '退出全屏',
+  'play.errNetwork': '拉流失败：多半是源已失效，或这个 CDN 不允许跨域播放。换一条线路或换个来源试试。',
+  'play.errMedia': '这条流解不开：编码不支持或文件已损坏。换一条线路试试。',
+  'play.errUnsupported': '这个浏览器解不了 HLS —— 换一个来源，或把下面的直链交给本地播放器。',
+  'play.insecure': '这条直链是 http，在 https 页面上会被浏览器拦掉，浏览器里播不了。换一条线路试试。',
+  'play.notStream': '这条线路给的是网页地址，不是流文件，内嵌播放取不到它。换一条线路试试。',
+
   // ---- Subtitles ----
   'subtitles.title': '字幕',
   'subtitles.loading': '搜索字幕中…',

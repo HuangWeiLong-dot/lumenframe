@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import CollapsibleSection from './CollapsibleSection'
 import Subtitles from './Subtitles'
 import { FILMGRAB_BASE } from '../api'
+import { copyToClipboard } from '../clipboard'
 import { useI18n } from '../i18n'
 
 // 走 FilmGrab FastAPI 的 /api/torrent/v1（本地经 Vite /filmgrab 代理，
@@ -139,33 +140,6 @@ function CheckIcon({ className }) {
   )
 }
 
-// 非安全上下文（http、部分内嵌 WebView）下 navigator.clipboard 不可用，用 textarea + execCommand 兜底
-async function copyToClipboard(text) {
-  try {
-    if (window.isSecureContext && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    // 继续走降级路径
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.setAttribute('readonly', '')
-    ta.style.position = 'fixed'
-    ta.style.top = '-9999px'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
-}
-
 function TorrentRow({ row }) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
@@ -272,7 +246,7 @@ export default function Torrents({ movie }) {
   const { t } = useI18n()
   // 下载资源恒用英文原名检索：各站点索引的是英文发布名，中文界面下 movie.title 已是中文，
   // 直接搜会命中不到资源。title_en 与界面语言无关，切换语言既不会重发请求也不会清空已加载的结果
-  // （剧集来自 TVmaze，本身即英文，无 title_en 字段时自然回退）
+  // （剧集的中文名由 server/tvmeta.js 从 TMDB 叠上去，title_en 是 TVmaze 原名）
   const title = movie?.title_en || movie?.title
   const year = movie?.year || ''
   const isTv = movie?.kind === 'tv'

@@ -6,4 +6,16 @@ dist/
 .env.*.local
 tmdb_test.json
 server/.cache/
+# 在线播放源清单：含盗版采集站地址，不进公共仓库；同时因为被忽略，
+# 它能扛住部署脚本的 git reset --hard（见 CLAUDE.md 的部署说明）。
+# 样例见 server/sources.example.json。
+server/sources.json
+# 4kvms( nb 源 )的签名 wasm：第三方站点的私有产物，不随仓库分发。
+# 与 sources.json 同理——被忽略，所以扛得住部署脚本的 git reset --hard；
+# 线上那台要单独放一份，缺失时 kind:"nb" 自隐藏。
+# 只忽略这两个文件，同目录的 README.md 留在版本控制里，说明来源和降级行为。
+server/vendor/nbmovie/nbmovie_wasm.js
+server/vendor/nbmovie/nbmovie_wasm_bg.wasm
 docs/
+.claude/
+

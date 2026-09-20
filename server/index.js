@@ -7,8 +7,10 @@ import { getSpecs } from './sow.js'
 import { getRatings } from './ratings.js'
 import { tastediveSimilar } from './tastedive.js'
 import { titleScore, normalizeTitle } from './titlematch.js'
-import { searchShows, getShow, getEpisodes, parseTvImageUrl, fetchTvImage } from './tvmaze.js'
+import { searchShows, searchShowsRaw, getShow, getEpisodes, parseTvImageUrl, fetchTvImage } from './tvmaze.js'
+import { resolveTmdbTv, localizeShow, localizeSummaries } from './tvmeta.js'
 import { searchSubtitles, downloadSubtitle } from './subtitles.js'
+import sourcesRouter from './sources.js'
 
 const TMDB_API = 'https://api.themoviedb.org/3'
 const TMDB_IMG = 'https://image.tmdb.org/t/p'
@@ -51,6 +53,11 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204)
   next()
 })
+
+// 在线播放源（采集站/TVBox 配置/解析接口的探活与聚合）。
+// 默认关闭：需 PLAY_SOURCES=1 且 server/sources.json 存在。未启用时整个路由
+// 回 {enabled:false}，前端区块自隐藏。自带缓存与限流，见 sources.js。
+app.use('/api/sources', sourcesRouter)
 
 // 简单内存缓存：相同请求 30 分钟内不重复打 TMDB（免费版限额 50 次/分钟）
 // inFlight 做并发单飞：同一 key 的多个冷请求只打一次上游
@@ -121,8 +128,10 @@ async function tmdb(path, params = {}, lang = 'en-US') {
 // ---- 多语言（API 层面支持中文）----
 // 前端通过 ?lang=zh-CN 请求中文本地化信息（标题/简介/类型/人物简介等）。
 // 例外（无中文能力或依赖英文做匹配，一律固定 en-US，见各路由注释）：
-//   TVmaze（剧集）、TasteDive（英文片名匹配）、ShotOnWhat / Rotten Tomatoes（按英文片名抓取）、
+//   TasteDive（英文片名匹配）、ShotOnWhat / Rotten Tomatoes（按英文片名抓取）、
 //   trailer（预告片排序依赖英文 "Official Trailer"）。
+// 剧集用 TVmaze 取数，但片名/简介/类型的中文由 tvmeta.js 从 TMDB 叠上去，
+// 所以它**不**在例外里 —— 详情与搜索路由都跟随 ?lang。
 const LANGS = new Set(['en-US', 'zh-CN', 'zh-TW'])
 function reqLang(req) {
   const raw = String(req.query.lang || '').trim()
@@ -132,6 +141,15 @@ function reqLang(req) {
 }
 // 语言相关结果必须按语言分桶缓存，否则中英会互相污染
 const lk = (key, lang) => `${key}:${lang}`
+
+// 剧集中文元数据（tvmeta.js）的两级取数，交给它时已带缓存，都按语言分桶
+// （find 结果里的片名/简介是本地化的，离开语言这一维中英会互相覆盖）。
+// `find` 那份很小（几百字节），搜索列表只用它；`detail` 那份是给详情页取类型名的。
+// 两者都进全局那个 200 条 FIFO，所以能省一次是一次。
+const tvMeta = {
+  find: (show, lang) => cached(lk(`tvfind:${show.id}`, lang), () => resolveTmdbTv(show, tmdb, lang)),
+  detail: (tmdbId, lang) => cached(lk(`tvdetail:${tmdbId}`, lang), () => tmdb(`/tv/${tmdbId}`, {}, lang)),
+}
 // 纯 ASCII 判定：非 ASCII 片名交给英文源（OMDB/RT/ShotOnWhat）查询必然失败，需先反查英文名
 const isAsciiText = (s) => !/[^\x20-\x7E]/.test(String(s || ''))
 
@@ -194,7 +212,9 @@ async function localizeMovieList(items, lang) {
 // 混合搜索：TMDB 电影 + TVmaze 剧集，一次返回两类结果（kind 字段区分）。
 // 两个 API 结果互相补全海报：当某条缺海报时，从另一个 API 的同名（+同年）条目中取海报。
 // 不额外发请求，仅复用本次两个搜索结果，避免触碰各自的 rate limit。
-// 语言：电影部分跟随 ?lang（中文关键词可直接搜到中文片名/简介）；剧集来自 TVmaze，恒为英文。
+// 语言：电影走 TMDB，剧集走 TVmaze + TMDB 中文叠加，两边都跟随 ?lang。
+// 剧集的中文名是必需的，不只是好看：详情页的「在线播放」是拿 `title` 去中文片源站搜的，
+// 只有英文名时会搜回来一堆同名无关条目（《神探夏洛克》→ 女神探夏洛克 / 少年神探狄仁杰…）。
 app.get('/api/search', async (req, res) => {
   const q = String(req.query.q || '').trim()
   if (!q) return res.json({ results: [] })
@@ -204,7 +224,9 @@ app.get('/api/search', async (req, res) => {
       cached(lk(`search:movie:${q}`, lang), () =>
         tmdb('/search/movie', { query: q, include_adult: false }, lang)
       ),
-      cached(`search:tv:${q}`, () => searchShows(q)).catch((e) => {
+      cached(lk(`search:tv:${q}`, lang), async () =>
+        localizeSummaries(await searchShowsRaw(q), lang, tvMeta)
+      ).catch((e) => {
         console.error('[search] TVmaze search failed:', e.message)
         return []
       }),
@@ -223,6 +245,7 @@ app.get('/api/search', async (req, res) => {
       kind: 'tv',
       id: s.id,
       title: s.title,
+      title_en: s.title_en, // 跨源海报互补的配对键，见下
       year: s.year,
       rating: s.rating,
       overview: s.overview || '',
@@ -231,11 +254,15 @@ app.get('/api/search', async (req, res) => {
 
     // 海报互补：以 normalizeTitle + year 为键，收集所有有海报的条目；
     // 缺海报的条目从同键的另一个 API 结果取海报字段。
-    // 注意：lang=zh 时 TMDB 标题是中文，而 normalizeTitle 会过滤掉非 ASCII（结果为空串），
-    // 会导致同年条目 key 全部塌缩到一起 —— 所以电影统一用 original_title 参与配对。
+    // 注意：lang=zh 时标题是中文，而 normalizeTitle 会过滤掉非 ASCII（结果为空串），
+    // 会导致同年条目 key 全部塌缩到一起 —— 所以两边都要用**英文**名参与配对：
+    // 电影用 original_title，剧集用 title_en（TVmaze 原名，见 tvmeta.js）。
     const posterPool = new Map() // key -> { poster_path?, tvPoster? }
-    const keyTitle = (it) => (it.kind === 'movie' ? it.original_title || it.title : it.title)
-    const keyOf = (t, y) => `${normalizeTitle(t) || String(t || '').trim().toLowerCase()}::${y || ''}`
+    const keyTitle = (it) =>
+      it.kind === 'movie' ? it.original_title || it.title : it.title_en || it.title
+    // normalizeTitle 直接 .normalize()，给 undefined 会抛；这里只喂字符串，
+    // 不让一条没名字的结果把整个搜索打成 502。
+    const keyOf = (t, y) => `${normalizeTitle(String(t || '')) || String(t || '').trim().toLowerCase()}::${y || ''}`
     for (const it of [...movies, ...shows]) {
       const k = keyOf(keyTitle(it), it.year)
       const cur = posterPool.get(k) || {}
@@ -1115,12 +1142,15 @@ app.get('/api/recommend/random', async (req, res) => {
 
 // ============ TVmaze 剧集 ============
 
-// 剧集搜索
+// 剧集搜索（?lang= 决定剧集名的语言）
 app.get('/api/tv/search', async (req, res) => {
   const q = String(req.query.q || '').trim()
   if (!q) return res.json({ results: [] })
+  const lang = reqLang(req)
   try {
-    const results = await cached(`tvsearch:${q}`, () => searchShows(q))
+    const results = await cached(lk(`tvsearch:${q}`, lang), async () =>
+      localizeSummaries(await searchShowsRaw(q), lang, tvMeta)
+    )
     res.json({ results })
   } catch (e) {
     res.status(502).json({ error: e.message })
@@ -1151,11 +1181,18 @@ app.get('/api/tv/image', async (req, res) => {
 })
 
 // 剧集详情（含 cast、季、分集数）
+//
+// 身份是 TVmaze id，载荷是 TVmaze 的；?lang=zh-CN 时再把 TMDB 的中文片名/简介/类型
+// 叠上去（tvmeta.js）。两层缓存：`tvshow:` 存 TVmaze 原文（与语言无关，切语言不重打
+// TVmaze），`tvshowzh:` 按语言存叠加结果 —— 少了语言这一维，中英文会互相覆盖。
 app.get('/api/tv/:id(\\d+)', async (req, res) => {
+  const lang = reqLang(req)
   try {
     const show = await cached(`tvshow:${req.params.id}`, () => getShow(Number(req.params.id)))
     if (!show) return res.status(404).json({ error: 'show not found' })
-    res.json(show)
+    res.json(
+      await cached(lk(`tvshowzh:${req.params.id}`, lang), () => localizeShow(show, lang, tvMeta))
+    )
   } catch (e) {
     res.status(502).json({ error: e.message })
   }

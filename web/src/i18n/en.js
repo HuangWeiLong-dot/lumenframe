@@ -311,6 +311,70 @@ export default {
   'torrents.magnetUnavailable': 'Magnet unavailable, open the detail page',
   'torrents.openSource': 'Open source page',
 
+  // ---- Play sources (collection sites) ----
+  'play.title': 'Streaming Sources',
+  // The password gate (PlayGate.jsx) only exists when VITE_PLAY_PASSWORD is set at build
+  // time, and this whole section is zh-only (OPEN_FOR_LANG), so these never actually
+  // render — kept in both files because t() warns on a key that is missing here.
+  'play.gateLocked': 'This section needs a password',
+  'play.gateLockedBody': 'Streaming is not public. The password is handed out by the site admin.',
+  'play.gateOpen': 'Enter password',
+  'play.gateTitle': 'Enter playback password',
+  'play.gateBody': 'The password is handed out by the site admin. Once entered, this browser remembers it.',
+  'play.gateLabel': 'Password',
+  'play.gateWrong': 'Wrong password. Try again.',
+  'play.gateSubmit': 'Unlock',
+  'play.gateContact': 'Need the password? Contact the admin at {email}',
+  'play.directBadge': 'Primary',
+  'play.directSource': 'Direct source',
+  'play.searching': 'Searching collection sites…',
+  'play.noResults': 'No streaming sources found for this title.',
+  'play.noResultsDirect': 'Nothing from the collection sites — the primary source above is ready to play.',
+  'play.unavailable': 'Streaming source service is unavailable.',
+  // No standing toolbar in this section any more (open to search, detection runs itself):
+  // a way to try again appears only in the empty/error states.
+  'play.retry': 'Search again',
+  // Feeds are named by position ("Line 1"), not by the collection site's own codename.
+  // {cn} is the Chinese numeral, used by the zh dictionary; this section is zh-only.
+  'play.line': 'Line {n}',
+  // Source number: one source keeps the same number across the whole list (see sourceNo
+  // in PlaySources). It replaces the server's 5-char hash alias, which was unreadable
+  // and unmemorable while only ever meaning "that row, over there".
+  'play.sourceNo': 'Source {n}',
+  // The notice block: one sentence, belonging to the whole section
+  'play.notice':
+    'Streams come from third-party collection sites and CDNs — nothing is stored or relayed here, and stalls or dead streams are normal.',
+  'play.loadingDetail': 'Loading episodes…',
+  // Progress of the widening pass (probe + re-search) that follows a cold search — it runs
+  // on its own, hence the wording rather than a button.
+  'play.probeRunning': 'Checking for more sources… this takes about 15–25 seconds.',
+  'play.play': 'Play',
+  'play.stage': 'Player',
+  'play.stageIdle': 'Pick an episode — it plays here.',
+  'play.seasons': 'Seasons',
+  'play.lines': 'Feeds',
+  'play.episodes': 'Episodes',
+  // ---- Custom player controls (no native controls, so every button needs a name) ----
+  'play.playerClose': 'Close',
+  'play.playerLoading': 'Loading stream…',
+  'play.buffering': 'Buffering…',
+  'play.playerFallback': 'Not playing? Hand the direct link to a local player',
+  'play.playerRetry': 'Retry',
+  'play.togglePlay': 'Play / pause',
+  'play.pause': 'Pause',
+  'play.seek': 'Seek',
+  'play.mute': 'Mute',
+  'play.unmute': 'Unmute',
+  'play.volume': 'Volume',
+  'play.enterFullscreen': 'Full screen',
+  'play.exitFullscreen': 'Exit full screen',
+  'play.errNetwork':
+    'Stream fetch failed: the source has likely expired, or this CDN does not allow cross-origin playback. Try another line or another source.',
+  'play.errMedia': 'This stream cannot be decoded: unsupported codec or corrupt file. Try another line.',
+  'play.errUnsupported': 'This browser cannot decode HLS — try another source, or hand the direct link below to a local player.',
+  'play.insecure': 'This link is http and will be blocked on an https page — it cannot play here. Try another line.',
+  'play.notStream': 'This line points at a web page, not a stream file — there is nothing to play inline. Try another line.',
+
   // ---- Subtitles ----
   'subtitles.title': 'Subtitles',
   'subtitles.loading': 'Searching subtitles…',
