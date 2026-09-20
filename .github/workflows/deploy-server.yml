@@ -3,7 +3,7 @@ name: Deploy backend to server
 on:
   push:
     branches: [main, master]
-    # 只有后端代码变了才重启服务；纯前端改动走 deploy-pages.yml
+    # 只有后端代码变了才重启服务；纯前端改动走 deploy-web.yml
     paths:
       - 'server/**'
       - 'filmgrab-service/**'

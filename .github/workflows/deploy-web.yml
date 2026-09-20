@@ -1,0 +1,100 @@
+name: Deploy web to Cloudflare Pages
+
+# 2026-09-20 从 GitHub Pages 迁到 Cloudflare Pages。
+# 起因：仓库转为 private 后前端直接 404 —— 从私有仓库发布 Pages 需要
+# Pro/Team/Enterprise，GitHub Free 只允许公共仓库发布。工作流本身没错，
+# 是账号套餐的资格问题，改 workflow 也修不了，所以换托管。
+#
+# 保留 GitHub Actions 构建（而不是改用 Cloudflare 的 Git 集成）的理由：
+# 五个构建期变量继续留在 GitHub 这一处，与后端 workflow 并列；
+# Cloudflare 那边只需要一个 API Token，不必把 VITE_* 再抄一份进去 ——
+# 两处配置迟早会不一致，而 PLAY_PASSWORD 不一致是**静默**的。
+on:
+  push:
+    branches: [main]
+    # 只有前端代码变了才重新发布；纯后端改动走 deploy-server.yml
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+# 同一时间只允许一次前端发布
+concurrency:
+  group: web-deploy
+  cancel-in-progress: false
+
+# 不再需要 pages: write / id-token: write —— 那是 GitHub Pages 的 OIDC 通道。
+# Cloudflare 走 API Token，权限范围在 Cloudflare 那边限定。
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 必须是 22+：@supabase/supabase-js 的 engines 要求 node >=22
+          # （2.116.0 起；最后支持 20 的版本是 2.105.0）
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        env:
+          # 仓库 Settings → Secrets and variables → Actions → Variables 配置：
+          #   API_BASE（必填）：Linux 服务器上的 API 域名，如 https://api.example.com
+          #   BASE_PATH（可选）：默认 '/'（自定义根域名）。本项目前端挂在顶点域名，
+          #                     不需要子路径；仅在有特殊需求时覆盖
+          #   FILMGRAB_BASE（可选）：剧照服务挂载前缀，如
+          #                     https://api.example.com/filmgrab；不部署则留空（区块自动隐藏）
+          #   SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY（可选）：启用账号与云端同步时填写；
+          #                     留空则不注入，账号入口自动隐藏。
+          #                     用 Variables 而非 Secrets —— publishable key 本就是公开的，
+          #                     放进 Secrets 只会让构建更难排查。
+          #   CF_PAGES_PROJECT（可选）：Cloudflare Pages 项目名，默认 lumenframe。
+          #                     只在 <项目名>.pages.dev 被别人占用、需要改名时设置。
+          #   （Secrets）PLAY_PASSWORD（可选）：在线播放的口令。**不配就整块照旧直开**，
+          #                     配了才出现锁定卡 + 输入弹窗。这里用 Secrets 而非 Variables，
+          #                     只是不让它出现在仓库设置页里；真实防护为零 —— 它是构建期
+          #                     字面量，会原样编进 JS bundle，谁都能从源码里读出来。
+          VITE_API_BASE: ${{ vars.API_BASE }}
+          VITE_FILMGRAB_BASE: ${{ vars.FILMGRAB_BASE }}
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          VITE_PLAY_PASSWORD: ${{ secrets.PLAY_PASSWORD }}
+          BASE_PATH: ${{ vars.BASE_PATH }}
+        run: |
+          # vite.config.js 是 base: env.BASE_PATH || '/'，所以空串会落到 '/',
+          # 正好是自定义根域名要的。这里只是把生效值打进日志便于排查。
+          export BASE_PATH="${BASE_PATH:-/}"
+          echo "Using BASE_PATH=$BASE_PATH"
+          npm run build
+
+      # 首次部署时项目还不存在。已存在时这条会以 "already exists" 失败 ——
+      # 所以 continue-on-error；真正的失败（token 无效、权限不足）会由下面
+      # 那条 publish 明确报出来，不会被这里吞掉。
+      - name: Ensure Pages project exists
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ${{ vars.CF_PAGES_PROJECT || 'lumenframe' }} --production-branch=main
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # --branch 必须与上面的 --production-branch 一致（都是 main），否则这次
+          # 发布会被 Cloudflare 当成**预览**部署：URL 变成 <hash>.<项目>.pages.dev，
+          # 自定义域名仍停在上一版，看起来就是"部署成功了但线上没变"。
+          command: pages deploy web/dist --project-name=${{ vars.CF_PAGES_PROJECT || 'lumenframe' }} --branch=main
