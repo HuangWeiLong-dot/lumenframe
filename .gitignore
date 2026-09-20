@@ -17,6 +17,22 @@ server/sources.json
 # 与 sources.json 不同：那份是配置数据（含采集站地址），仍然不进仓库。
 # 来源、为什么必须跑它而不能自己实现签名、以及缺失时的降级行为，见同目录 README.md。
 
+# Torrent-Api-py 是从上游 clone 来**只作参照**的独立 checkout —— 里面的
+# routers/ torrents/ helper/ constants/ 已逐字 vendor 进 filmgrab-service/
+# （要改就改那边那份，别改这里；没有任何构建或运行路径 import 它）。
+#
+# 它以 gitlink（索引模式 160000）的形式残留在索引里，指向 1a302617，
+# 却**没有对应的 .gitmodules** —— 那个 commit 在父仓库里根本不存在。
+# 于是任何执行 git submodule update --init --recursive 的克隆都会直接失败：
+#   fatal: no submodule mapping found in .gitmodules for path 'Torrent-Api-py'
+# Cloudflare Pages 的构建就是这么挂掉的（日志末行：
+# "Failed: error occurred while updating repository submodules"）。
+# 修法是把它从索引里摘掉，本地这份 checkout 原样留着作参照。
+#
+# 这条 ignore 是**载重**的，不是顺手加的：该目录里带着自己的 .git，不忽略的话
+# 下一次 git add -A 会把它重新识别成 gitlink 加回去 —— 等于没修。
+Torrent-Api-py/
+
 docs/
 .claude/
 
