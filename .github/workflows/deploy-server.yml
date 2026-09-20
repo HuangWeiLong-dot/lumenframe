@@ -3,8 +3,7 @@ name: Deploy backend to server
 on:
   push:
     branches: [main, master]
-    # 只有后端代码变了才重启服务；纯前端改动不从这里走 ——
-    # 前端由 Cloudflare Pages 的 Git 集成自己构建（仓库里没有前端工作流）
+    # 只有后端代码变了才重启服务；纯前端改动走 deploy-pages.yml
     paths:
       - 'server/**'
       - 'filmgrab-service/**'

@@ -25,8 +25,10 @@ server/sources.json
 # 却**没有对应的 .gitmodules** —— 那个 commit 在父仓库里根本不存在。
 # 于是任何执行 git submodule update --init --recursive 的克隆都会直接失败：
 #   fatal: no submodule mapping found in .gitmodules for path 'Torrent-Api-py'
-# Cloudflare Pages 的构建就是这么挂掉的（日志末行：
+# 2026-09-20 Cloudflare 的构建就是这么挂掉的（日志末行：
 # "Failed: error occurred while updating repository submodules"）。
+# 注意 GitHub Actions 的 actions/checkout 默认**不**递归子模块，所以走 Pages
+# 那阵子一直没暴露 —— 这条 ignore 是为了任何会递归克隆的场景，不只为某一家托管。
 # 修法是把它从索引里摘掉，本地这份 checkout 原样留着作参照。
 #
 # 这条 ignore 是**载重**的，不是顺手加的：该目录里带着自己的 .git，不忽略的话

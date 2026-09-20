@@ -50,8 +50,11 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
 
   return {
-    // GitHub Pages 项目站点部署在 https://<user>.github.io/<repo>/ 子路径下，
-    // CI 构建时通过 BASE_PATH=/<repo>/ 注入；本地开发与独立域名部署保持 '/'。
+    // CI 构建时通过 BASE_PATH 注入。deploy-pages.yml 传的是 './'（相对路径）：
+    // 同一份产物在 GitHub Pages 项目子路径 /<repo>/ 和顶点自定义域名下都能跑，
+    // 而绝对 '/<repo>/' 会把仓库名写死、绝对 '/' 在子路径下直接白屏。
+    // 运行时真正的根由 src/spaUrl.js 的 getBasePath() 从 location 反推，不依赖这里。
+    // 本地开发不传，落到 '/'。
     base: env.BASE_PATH || '/',
     plugins: [react(), tailwindcss(), homePrefetch(env.VITE_API_BASE || '')],
     server: {

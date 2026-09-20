@@ -1,7 +1,6 @@
 import { resolveSpaRedirect, siteRoot } from './spaUrl'
 
-// 构建期注入（见 web/.env.example；线上由 Cloudflare Pages 构建时注入，
-// 变量配在 Pages 项目 → Settings → Environment variables，不走 GitHub）。
+// 构建期注入（见 web/.env.example 与 .github/workflows/deploy-pages.yml）。
 // 未配置时整个云端同步功能自隐藏：不出现账号入口、不发起任何请求、不加载 SDK——
 // 与 FILMGRAB_BASE 为空时 Film Stills 区块自隐藏是同一条约定。
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || ''
