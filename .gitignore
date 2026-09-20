@@ -10,12 +10,13 @@ server/.cache/
 # 它能扛住部署脚本的 git reset --hard（见 CLAUDE.md 的部署说明）。
 # 样例见 server/sources.example.json。
 server/sources.json
-# 4kvms( nb 源 )的签名 wasm：第三方站点的私有产物，不随仓库分发。
-# 与 sources.json 同理——被忽略，所以扛得住部署脚本的 git reset --hard；
-# 线上那台要单独放一份，缺失时 kind:"nb" 自隐藏。
-# 只忽略这两个文件，同目录的 README.md 留在版本控制里，说明来源和降级行为。
-server/vendor/nbmovie/nbmovie_wasm.js
-server/vendor/nbmovie/nbmovie_wasm_bg.wasm
+# 4kvms( nb 源 )的签名 wasm：第三方站点的产物，**进版本控制**（2026-09-20 改的）。
+# 理由是部署脚本走 git reset --hard —— 只有提交了，它才会被送到线上那台；
+# 留在仓库外面就得每上一台新机器手工拷一次，而漏拷的表现是 kind:"nb" 被**静默跳过**
+# （看上去像「4kvms 那条不见了」或「代码没上去」，不报错，很难查）。
+# 与 sources.json 不同：那份是配置数据（含采集站地址），仍然不进仓库。
+# 来源、为什么必须跑它而不能自己实现签名、以及缺失时的降级行为，见同目录 README.md。
+
 docs/
 .claude/
 

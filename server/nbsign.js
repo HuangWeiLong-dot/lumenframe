@@ -20,9 +20,9 @@ const BIN = path.join(DIR, 'nbmovie_wasm_bg.wasm')
 // 实测只有 1080 在 Web 上直接可用 —— 这也是站点自己的默认值。
 export const QUALITY = '1080'
 
-// vendor 里那两个文件是 gitignore 的（第三方产物不随仓库分发），
-// 所以线上那台没手工放一份时这里必须是「缺席」而不是「报错」——
-// 与 sources.json 缺失时整个区块自隐藏是同一个约定。
+// vendor 里那两个文件是**随仓库分发**的（2026-09-20 起，理由见 .gitignore），
+// 所以正常情况下它们一定在位。但检查不能省：手工搭的环境、或有人清理过 vendor，
+// 这里必须是「缺席」而不是「报错」——与 sources.json 缺失时整个区块自隐藏同一个约定。
 export function available() {
   return existsSync(GLUE) && existsSync(BIN)
 }

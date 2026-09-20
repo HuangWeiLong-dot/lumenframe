@@ -63,7 +63,12 @@ globalThis.document = { getElementById: () => null }
 
 ## 法务
 
-那两个文件是 4kvms.com 的产物，不是我们的。`.gitignore` 只忽略了它们
-（`nbmovie_wasm.js` / `nbmovie_wasm_bg.wasm`），**不随仓库分发**——线上那台要放一份得手工拷
-（同 `sources.json`）；本 README 是我们自己写的，留在版本控制里。同样地，这个源类型只在
-`PLAY_SOURCES=1` 且 `sources.json` 里有 `kind:"nb"` 时才启用，线上那份 sources.json 也是手工维护的。
+那两个文件是 4kvms.com 的产物，不是我们的。**2026-09-20 起它们随仓库一起分发**——
+提交进版本控制，是因为部署脚本走 `git reset --hard origin/main`：只有提交了，它们才会
+被送到线上那台。（在此之前是 gitignore + 手工拷。改这一条的理由见 `.gitignore`：手工拷
+一旦漏掉，`kind:"nb"` 是**静默跳过**的，表现为「4kvms 那条不见了」，不报错，排查成本高。
+本 README 是我们自己写的，一直留在版本控制里。）仓库是私有的，不是公开分发。
+
+仍然**不在**仓库里的只有 `server/sources.json` —— 那是配置数据（含采集站地址），
+线上那份是手工维护的。所以这个源类型要生效，还是三个条件同时成立：`PLAY_SOURCES=1`、
+`sources.json` 里有 `kind:"nb"`、以及本目录两个文件在位（这两条现在由仓库保证）。
