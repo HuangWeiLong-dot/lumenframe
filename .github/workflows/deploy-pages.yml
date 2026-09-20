@@ -62,10 +62,20 @@ jobs:
         run: |
           BASE_PATH="${{ vars.BASE_PATH }}"
           if [ -z "$BASE_PATH" ]; then
-            BASE_PATH="./"  # 相对 base：同一份产物在 /<repo>/ 子路径和顶点自定义域名下**都**能跑。
-                            # 绝对 '/' 只在顶点域名成立，子路径下会白屏（index.html 里写死的
-                            # /assets/... 全部 404），所以不拿它当默认值。
-                            # 运行时真正的根由 src/spaUrl.js 的 getBasePath() 反推，见那里的注释。
+            BASE_PATH="/"   # 必须是**绝对**路径：'/' = 顶点自定义域名，'/<repo>/' = 项目子路径。
+                            #
+                            # ⚠️ 千万别改成相对 './'。2026-09-20 试过一次，**所有深链白屏**
+                            # （首页正常，所以只看首页看不出来）。机理：
+                            #   1. 深链 /movie/123-x 未匹配文件 → GitHub Pages 给 404.html
+                            #   2. 404.html 把原路径塞进 _spa 跳回根 → 文档 URL 变成 /?_spa=...
+                            #   3. index.html 的 <head> 内联脚本在 body 解析**之前**就
+                            #      replaceState 回 /movie/123-x
+                            #   4. 于是后面那个 <script src="./assets/index-*.js"> 按**新文档
+                            #      URL** 解析 → /movie/assets/index-*.js → 404
+                            #   5. 一个 JS 都没加载 → #root 空白 → 白屏
+                            # 首页步骤 3 不变换 URL，'./assets/...' 才会解析成 '/assets/...'。
+                            # 绝对路径对 replaceState 免疫，顶点和子路径两种布局都安全 ——
+                            # 这也是运行时那个 getBasePath() 存在的意义（见 src/spaUrl.js）。
           fi
           echo "Using BASE_PATH=$BASE_PATH"
           BASE_PATH="$BASE_PATH" npm run build

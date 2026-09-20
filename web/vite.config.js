@@ -50,9 +50,12 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), ''), ...process.env }
 
   return {
-    // CI 构建时通过 BASE_PATH 注入。deploy-pages.yml 传的是 './'（相对路径）：
-    // 同一份产物在 GitHub Pages 项目子路径 /<repo>/ 和顶点自定义域名下都能跑，
-    // 而绝对 '/<repo>/' 会把仓库名写死、绝对 '/' 在子路径下直接白屏。
+    // CI 构建时通过 BASE_PATH 注入，**必须是绝对路径**：
+    //   '/'        顶点自定义域名（当前线上就是它）
+    //   '/<repo>/' GitHub Pages 项目子路径
+    // 不能用相对 './' —— 深链会白屏（首页却正常，所以极易漏掉）。机理写在
+    // deploy-pages.yml 的 BASE_PATH 那段：index.html 的 <head> 内联脚本会在
+    // body 解析前把 URL replaceState 回深链，相对 src 便按新文档 URL 解析。
     // 运行时真正的根由 src/spaUrl.js 的 getBasePath() 从 location 反推，不依赖这里。
     // 本地开发不传，落到 '/'。
     base: env.BASE_PATH || '/',

@@ -24,7 +24,10 @@ export function resolveSpaRedirect() {
 // 站内一级路由段。与 public/404.html 的 detectRoot 是同一份判据，改一处必须改另一处。
 const ROUTE_SEGMENTS = new Set(['movie', 'tv', 'person', 'genre', 'library'])
 
-// 运行时推导站点根路径（生产构建为相对 base './'，不能直接用 import.meta.env.BASE_URL）：
+// 运行时推导站点根路径。不能直接用 import.meta.env.BASE_URL：它是构建期写死的
+// （'/' 或 '/<repo>/'），而这里要在运行时同时应付两种布局。
+// （曾据此以为「生产构建用相对 base './'」，那是**错的** —— 相对 base 会让深链白屏，
+// 见 vite.config.js 的 base 与 deploy-pages.yml 的 BASE_PATH 两处注释。）
 // 深链 /movie/...、/tv/... 或 /<repo>/movie/... 都能反推出根；根路径通常以 / 结尾。
 //
 // 必须按**路径分段**找第一个路由段，不能用 /(movie|tv)\// 这类子串匹配：
