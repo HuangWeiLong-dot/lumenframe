@@ -112,7 +112,7 @@ export default function ShowEpisodes({ show, cardImage, onSelectCardImage }) {
                   type="button"
                   onClick={() => onSelectCardImage(isSelected ? null : imgSrc)}
                   className={`group relative hidden aspect-video w-36 shrink-0 overflow-hidden bg-zinc-100 sm:block ${
-                    isSelected ? 'ring-2 ring-black' : ''
+                    isSelected ? 'ring-2 ring-inset ring-black' : ''
                   }`}
                   title={isSelected ? t('showEpisodes.removeFromCard') : t('showEpisodes.useOnCard')}
                 >
@@ -159,7 +159,9 @@ export default function ShowEpisodes({ show, cardImage, onSelectCardImage }) {
           <p className="mb-1 text-sm font-semibold uppercase tracking-wider text-zinc-800">
             {t('showEpisodes.episodeStills')}
           </p>
-          {/* 选中描边不加 ring-offset：offset 的白圈画在黑圈**之上**，会在图片与黑边之间凿出一条白缝 */}
+          {/* 选中描边必须 ring-inset：外描边会被 CollapsibleSection 的 overflow-hidden 裁掉
+              （最左/最右一列正好和网格同宽），且 ring-offset 的白圈画在黑圈**之上**、
+              会在图片与黑边之间凿出一条白缝。inset 画在元素内部，永远裁不到。 */}
           <p className="mb-3 text-xs text-zinc-700">
             {t('showEpisodes.tapForCard')}
           </p>
@@ -171,7 +173,7 @@ export default function ShowEpisodes({ show, cardImage, onSelectCardImage }) {
                 <div
                   key={`still-${ep.season}-${ep.number}`}
                   className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
-                    isSelected ? 'ring-2 ring-black' : ''
+                    isSelected ? 'ring-2 ring-inset ring-black' : ''
                   }`}
                 >
                   <button

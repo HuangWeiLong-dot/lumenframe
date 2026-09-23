@@ -316,10 +316,14 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
 
           {/* Background */}
           <Section title={t('cardStudio.background')}>
-            {/* 选中态**不能**给 ring-offset：offset 那一层白圈在 box-shadow 列表里排在黑圈
-                之前，即画在黑圈**之上**，于是 1px 黑边框和 2px 黑圈之间被凿出一条白缝，
-                看着像套了两层。去掉 offset 后两者连成一条干净的 3px 黑边。
-                （同样处理见 CardStudio 的文字色板、以及各处「按图做卡片」的图片格。） */}
+            {/* 选中态必须 ring-inset，两个理由：
+                1. 外描边会被 CollapsibleSection 外层的 overflow-hidden 裁掉 —— 它和色板行
+                   同宽，最左/最右那块的黑边会被切掉一半（实测：两者左边缘都是 197px）。
+                   inset 画在元素内部，几何上不可能被裁。
+                2. 不能改用 ring-offset 去拉开距离：offset 那层白圈在 box-shadow 列表里排
+                   在黑圈**之前**，即画在黑圈**之上**，会在 1px 黑边框和 2px 黑圈之间凿出
+                   一条白缝。inset 顺带也没了这个问题。
+                同样处理见文字色板与各处「按图做卡片」的图片格。 */}
             <div className="flex flex-wrap items-center gap-2">
               {COLORS.map((c) => (
                 <button
@@ -328,7 +332,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   style={{ background: c }}
                   aria-label={`${t('cardStudio.background')} ${c}`}
                   className={`h-7 w-7 border transition ${
-                    config.bgColor === c ? 'border-black ring-2 ring-black' : 'border-zinc-300 hover:scale-110'
+                    config.bgColor === c ? 'border-black ring-2 ring-inset ring-black' : 'border-zinc-300 hover:scale-110'
                   }`}
                 />
               ))}
@@ -352,7 +356,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   title={t.label}
                   className={`h-7 w-7 border transition ${
                     config.textColor === t.id
-                      ? 'border-black ring-2 ring-black'
+                      ? 'border-black ring-2 ring-inset ring-black'
                       : 'border-zinc-300 hover:scale-110'
                   }`}
                   style={t.hex ? { background: t.hex } : { background: 'linear-gradient(135deg, #fff 50%, #000 50%)' }}

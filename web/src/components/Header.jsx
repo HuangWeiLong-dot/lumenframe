@@ -102,7 +102,7 @@ export default function Header({ onHome, onLibrary }) {
           <div
             role="group"
             aria-label={t('header.switchLang')}
-            className="hidden items-center border border-zinc-300 sm:flex"
+            className="hidden items-center sm:flex"
           >
             {['en', 'zh'].map((code) => (
               <button
