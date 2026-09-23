@@ -43,6 +43,13 @@ const isCustomText = (v) => !TEXT_COLORS.some((c) => sameColor(c.id, v))
 const textColorHexOf = (v) => TEXT_COLORS.find((c) => sameColor(c.id, v))?.hex
   || (isCustomText(v) && /^#[0-9a-f]{6}$/i.test(String(v)) ? v : '#FFFFFF')
 
+// 取色器只会回传 hex，而预设是用 id（'gold'）或大小写各异的 hex（'#F3EFE7'）标识的。
+// 所以从取色器回来的值必须先「还原」成预设，否则 state 会从 'gold' 变成 '#d4a857'，
+// 预设按钮随即失去选中态 —— 表现为「选好颜色后点一下屏幕，选中就被重置了」。
+// 触发点：Chrome 的取色对话框被点空白处关掉时，会用**打开时**的旧值再发一次 input/change。
+const textIdForHex = (hex) => TEXT_COLORS.find((c) => c.hex && sameColor(c.hex, hex))?.id
+const canonicalBg = (hex) => COLORS.find((c) => sameColor(c, hex)) || hex
+
 const MOVIE_OPTIONS = [
   { key: 'showRatings', labelKey: 'cardStudio.ratings' },
   { key: 'showYear', labelKey: 'cardStudio.year' },
@@ -350,14 +357,14 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   style={{ background: c }}
                   aria-label={`${t('cardStudio.background')} ${c}`}
                   className={`h-7 w-7 border transition ${
-                    config.bgColor === c ? 'border-black ring-2 ring-inset ring-black' : 'border-zinc-300 hover:scale-110'
+                    sameColor(config.bgColor, c) ? 'border-black ring-2 ring-inset ring-black' : 'border-zinc-300 hover:scale-110'
                   }`}
                 />
               ))}
               <input
                 type="color"
                 value={config.bgColor}
-                onChange={(e) => set({ bgColor: e.target.value })}
+                onChange={(e) => set({ bgColor: canonicalBg(e.target.value) })}
                 aria-label={t('cardStudio.customColor')}
                 title={t('cardStudio.customColor')}
                 className={`h-7 w-9 cursor-pointer border bg-white transition ${
@@ -376,7 +383,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   onClick={() => set({ textColor: t.id })}
                   title={t.label}
                   className={`h-7 w-7 border transition ${
-                    config.textColor === t.id
+                    sameColor(config.textColor, t.id)
                       ? 'border-black ring-2 ring-inset ring-black'
                       : 'border-zinc-300 hover:scale-110'
                   }`}
@@ -386,7 +393,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               <input
                 type="color"
                 value={textColorHexOf(config.textColor)}
-                onChange={(e) => set({ textColor: e.target.value })}
+                onChange={(e) => set({ textColor: textIdForHex(e.target.value) || e.target.value })}
                 aria-label={t('cardStudio.customColor')}
                 title={t('cardStudio.customColor')}
                 className={`h-7 w-9 cursor-pointer border bg-white transition ${
