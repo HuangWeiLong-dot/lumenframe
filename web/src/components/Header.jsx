@@ -6,17 +6,22 @@ import { useSyncStatus } from '../sync/engine'
 import AuthModal from './AuthModal'
 
 // 同步状态圆点：灰=空闲、黑闪=同步中、红=失败、琥珀=有一批删除被熔断扣下（待确认）
-function SyncDot({ state }) {
+// onDark：账号块是黑底，空闲/同步中两态在黑底上不可见，换成浅色（红/琥珀两态黑底白底通用）
+function SyncDot({ state, onDark = false }) {
   return (
     <span
       className={`inline-block h-[6px] w-[6px] shrink-0 ${
         state === 'syncing'
-          ? 'animate-pulse bg-black'
+          ? onDark
+            ? 'animate-pulse bg-white'
+            : 'animate-pulse bg-black'
           : state === 'error'
             ? 'bg-red-500'
             : state === 'guard'
               ? 'bg-amber-500'
-              : 'bg-zinc-300'
+              : onDark
+                ? 'bg-zinc-500'
+                : 'bg-zinc-300'
       }`}
     />
   )
@@ -71,7 +76,7 @@ export default function Header({ onHome, onLibrary }) {
           </button>
         </div>
 
-        {/* 右侧：桌面 Library + References + 移动端汉堡 */}
+        {/* 右侧：桌面 Library + 账号 + 语言 + References + 移动端汉堡 */}
         <div className="flex items-center gap-3">
           <button
             onClick={onLibrary}
@@ -79,18 +84,48 @@ export default function Header({ onHome, onLibrary }) {
           >
             {t('header.library')}
           </button>
-          {/* 账号：未配置 Supabase 时整块不渲染（同 Film Stills 区块的自隐藏约定） */}
+          {/* 账号：黑底反白，全站唯一的高对比块，未登录时就是「登录」按钮。
+              未配置 Supabase 时整块不渲染（同 Film Stills 区块的自隐藏约定） */}
           {isSupabaseConfigured && (
             <button
               onClick={() => openModal('signin')}
-              className="hidden max-w-[11rem] items-center gap-2 text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:flex"
+              title={auth.user ? auth.username || auth.user.email : t('account.signIn')}
+              className="hidden max-w-[11rem] items-center gap-2 bg-black px-3 py-2 text-xs uppercase tracking-[0.2em] text-white transition hover:bg-zinc-800 sm:flex"
             >
               <span className="truncate">
                 {auth.user ? auth.username || auth.user.email.split('@')[0] : t('account.signIn')}
               </span>
-              {auth.user && <SyncDot state={sync.state} />}
+              {auth.user && <SyncDot state={sync.state} onDark />}
             </button>
           )}
+          {/* 语言切换：≥ sm 在顶栏右侧一格；< sm 收进右侧滑块里（见下方 nav 的 Language 行） */}
+          <div
+            role="group"
+            aria-label={t('header.switchLang')}
+            className="hidden items-center border border-zinc-300 sm:flex"
+          >
+            {['en', 'zh'].map((code) => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => setLang(code)}
+                aria-pressed={lang === code}
+                className={`flex h-7 min-w-[32px] items-center justify-center px-2 text-[10px] font-semibold uppercase tracking-[0.15em] transition ${
+                  lang === code
+                    ? 'bg-black text-white'
+                    : 'text-zinc-600 hover:bg-zinc-100 hover:text-black'
+                }`}
+              >
+                {/* zh 那一格显示「中」：用系统字体（理由同 LanguagePicker 与 index.css 的
+                    .font-system-cjk）。这一格在英文界面下也是首屏可见的汉字，
+                    字面量 '中' 只落在 Noto Sans SC 的一个 subset 里，仅此一个字形就会拉下 75.3 KiB。
+                    字重显式给 700，不继承按钮的 font-semibold(600)。 */}
+                <span className={code === 'zh' ? 'font-system-cjk font-bold' : ''}>
+                  {code === 'en' ? t('lang.en') : t('lang.zh')}
+                </span>
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => setOpen(true)}
             className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
@@ -137,17 +172,17 @@ export default function Header({ onHome, onLibrary }) {
           </button>
         </div>
         <nav className="flex flex-col overflow-y-auto px-2 py-3" style={{ maxHeight: 'calc(100vh - 65px)' }}>
-          {/* 账号：< sm 时顶栏按钮隐藏，改从这里进 */}
+          {/* 账号：< sm 时顶栏那块黑底账号按钮隐藏，改从这里进；黑底沿用顶栏那一块的样式 */}
           {isSupabaseConfigured && (
             <button
               onClick={() => { setOpen(false); openModal('signin') }}
-              className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"
+              className="flex items-center justify-between bg-black px-4 py-3.5 text-sm text-white transition hover:bg-zinc-800"
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">
                   {auth.user ? auth.username || auth.user.email : t('account.signIn')}
                 </span>
-                {auth.user && <SyncDot state={sync.state} />}
+                {auth.user && <SyncDot state={sync.state} onDark />}
               </span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
                 <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
@@ -163,12 +198,12 @@ export default function Header({ onHome, onLibrary }) {
               <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
             </svg>
           </button>
-          {/* 语言切换：< sm 时右下角悬浮按钮已隐藏，改从滑块里切换 */}
+          {/* 语言切换：< sm 唯一的入口（≥ sm 在顶栏右侧那一格） */}
           <div className="flex items-center justify-between px-4 py-3 text-sm text-black">
             <span>{t('header.language')}</span>
             <div className="flex items-center gap-1">
-              {/* zh 那一格显示「中」：同右下角悬浮按钮，换系统字体（见其注释）。
-                  只作用于非 en 项——en 项是纯 ASCII，换成系统字体只会让 Inter 的字距变样；
+              {/* zh 那一格显示「中」：同顶栏那一格，用系统字体（见其注释）。
+                  只作用于 zh 项——en 项是纯 ASCII，换成系统字体只会让 Inter 的字距变样；
                   字重也在这里显式给 700，不继承按钮的 font-semibold(600)（见 index.css）。 */}
               {['en', 'zh'].map((code) => (
                 <button
@@ -241,21 +276,6 @@ export default function Header({ onHome, onLibrary }) {
           />
         </div>
       </aside>
-
-      {/* 语言切换：≥ sm 用右下角悬浮按钮；< sm 收进右侧滑块里（见上方 nav 的 Language 行） */}
-      <button
-        onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}
-        aria-label={t('header.switchLang')}
-        className="fixed bottom-5 right-5 z-[1000] hidden h-10 w-10 items-center justify-center border border-zinc-300 bg-white/80 text-xs font-semibold uppercase tracking-wider text-zinc-700 shadow-lg backdrop-blur-md transition hover:bg-white hover:text-black sm:flex"
-      >
-        {/* 英文界面下这个按钮显示「中」——全站唯一的汉字，且不在 LanguagePicker 的
-            .font-system-cjk 覆盖范围内。字面量 '中' 落在 Noto Sans SC 的 subset 119 里，
-            仅此一个字形就会在首屏拉下 75.3 KiB 字体，和 LCP 海报抢带宽。
-            与弹窗同一套理由换系统字体；切到中文界面后这里是 'EN'，不需要该字体。 */}
-        <span className={lang === 'en' ? 'font-system-cjk font-bold' : ''}>
-          {lang === 'en' ? t('lang.zh') : t('lang.en')}
-        </span>
-      </button>
 
       {/* 账号弹窗放在触发按钮所在的组件里，两者不会各自漂移 */}
       <AuthModal />
