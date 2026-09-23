@@ -83,9 +83,13 @@ export default function TvBackdrops({ show, selected, onSelect }) {
 
       {status === 'done' && shots.length > 0 && (
         <>
-          {/* 选中描边必须 ring-inset：外描边会被 CollapsibleSection 的 overflow-hidden 裁掉
-              （最左/最右一列正好和网格同宽），且 ring-offset 的白圈画在黑圈**之上**、
-              会在图片与黑边之间凿出一条白缝。inset 画在元素内部，永远裁不到。 */}
+          {/* 选中态是两条 inset 描边，都画在图片**内部** —— 外描边会被 CollapsibleSection
+              的 overflow-hidden 裁掉（最左/最右一列正好和网格同宽）。
+                外圈 2px 黑：inset-ring-2 inset-ring-black（box-shadow 列表里排在前面 = 画在上层）
+                内圈 2px 白：ring-4 ring-inset ring-white（在下层，外侧 2px 被黑圈盖住）
+              两条都要：亮图上黑圈可见、暗图上白圈可见，单靠任一条都有整类图看不出来。
+              别改成外层 ring + ring-offset：offset 那层白圈在 box-shadow 列表里排在黑圈
+              之前，即画在黑圈**之上**，会在黑边与图片之间凿出一条白缝。 */}
           <p className="mb-3 text-xs text-zinc-700">{t('tvBackdrops.tapForCard')}</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
             {shots.map((src, i) => {
@@ -94,7 +98,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
                 <div
                   key={src}
                   className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
-                    isSelected ? 'ring-2 ring-inset ring-black' : ''
+                    isSelected ? 'ring-4 ring-inset ring-white inset-ring-2 inset-ring-black' : ''
                   }`}
                 >
                   <button
