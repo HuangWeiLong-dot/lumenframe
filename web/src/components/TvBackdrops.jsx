@@ -83,6 +83,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
 
       {status === 'done' && shots.length > 0 && (
         <>
+          {/* 选中描边不加 ring-offset：offset 的白圈画在黑圈**之上**，会在图片与黑边之间凿出一条白缝 */}
           <p className="mb-3 text-xs text-zinc-700">{t('tvBackdrops.tapForCard')}</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
             {shots.map((src, i) => {
@@ -91,7 +92,7 @@ export default function TvBackdrops({ show, selected, onSelect }) {
                 <div
                   key={src}
                   className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
-                    isSelected ? 'ring-2 ring-black ring-offset-2' : ''
+                    isSelected ? 'ring-2 ring-black' : ''
                   }`}
                 >
                   <button

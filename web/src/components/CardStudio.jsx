@@ -316,6 +316,10 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
 
           {/* Background */}
           <Section title={t('cardStudio.background')}>
+            {/* 选中态**不能**给 ring-offset：offset 那一层白圈在 box-shadow 列表里排在黑圈
+                之前，即画在黑圈**之上**，于是 1px 黑边框和 2px 黑圈之间被凿出一条白缝，
+                看着像套了两层。去掉 offset 后两者连成一条干净的 3px 黑边。
+                （同样处理见 CardStudio 的文字色板、以及各处「按图做卡片」的图片格。） */}
             <div className="flex flex-wrap items-center gap-2">
               {COLORS.map((c) => (
                 <button
@@ -324,7 +328,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   style={{ background: c }}
                   aria-label={`${t('cardStudio.background')} ${c}`}
                   className={`h-7 w-7 border transition ${
-                    config.bgColor === c ? 'border-black ring-2 ring-black ring-offset-1' : 'border-zinc-300 hover:scale-110'
+                    config.bgColor === c ? 'border-black ring-2 ring-black' : 'border-zinc-300 hover:scale-110'
                   }`}
                 />
               ))}
@@ -348,7 +352,7 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                   title={t.label}
                   className={`h-7 w-7 border transition ${
                     config.textColor === t.id
-                      ? 'border-black ring-2 ring-black ring-offset-1'
+                      ? 'border-black ring-2 ring-black'
                       : 'border-zinc-300 hover:scale-110'
                   }`}
                   style={t.hex ? { background: t.hex } : { background: 'linear-gradient(135deg, #fff 50%, #000 50%)' }}

@@ -1337,6 +1337,7 @@ export default function App() {
                 </div>
               ) : (
                 <>
+                  {/* 选中描边不加 ring-offset：offset 的白圈画在黑圈**之上**，会在图片与黑边之间凿出一条白缝 */}
                   <p className="mb-3 text-xs text-zinc-700">{t('detail.tapPosterForCard')}</p>
                   <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 sm:gap-3">
                     {altPosters.map((p, i) => {
@@ -1347,7 +1348,7 @@ export default function App() {
                         <div
                           key={p.file_path || i}
                           className={`group relative aspect-[2/3] overflow-hidden bg-zinc-100 transition ${
-                            isSelected ? 'ring-2 ring-black ring-offset-2' : ''
+                            isSelected ? 'ring-2 ring-black' : ''
                           }`}
                         >
                           <button
@@ -1413,7 +1414,7 @@ export default function App() {
                         <div
                           key={b.file_path || i}
                           className={`group relative aspect-video overflow-hidden bg-zinc-100 transition ${
-                            isSelected ? 'ring-2 ring-black ring-offset-2' : ''
+                            isSelected ? 'ring-2 ring-black' : ''
                           }`}
                         >
                           <button
