@@ -25,6 +25,24 @@ const TEXT_COLORS = [
   { id: 'blue', label: 'Blue', hex: '#4A90D9' },
 ]
 
+// ---- 自定义色的判定 ----
+// 「自定义」= 当前值落在预设之外。两处细节：
+//   · COLORS / TEXT_COLORS 的 hex 大小写混用（'#F3EFE7'），而 <input type="color"> 回传的是
+//     全小写（'#f3efe7'），所以比较前必须统一小写，否则预设色也会被判成自定义。
+//   · TEXT_COLORS 用 id（'auto'/'gold'…）标识，而自定义时 config.textColor 直接存 hex，
+//     所以文字色这一路要连 id 一起比。
+const sameColor = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase()
+const isCustomBg = (v) => !COLORS.some((c) => sameColor(c, v))
+const isCustomText = (v) => !TEXT_COLORS.some((c) => sameColor(c.id, v))
+
+// 文字色取色器的 value：预设取它的 hex，自定义就直接把 hex 交给 input。
+// 不能只写 `TEXT_COLORS.find(...)?.hex || '#FFFFFF'` —— 自定义 hex 匹配不到任何 id，
+// find() 落空后回落到 '#FFFFFF'，于是选完自定义色的**瞬间**取色器跳回白色（实测：
+// 设成 #c8a24a 后 input.value 立刻变回 #ffffff）。受控 input 会拿这个值覆盖 DOM，
+// 用户不但看不到自己选的颜色，之后再碰一下取色器还会把状态覆盖成白色。
+const textColorHexOf = (v) => TEXT_COLORS.find((c) => sameColor(c.id, v))?.hex
+  || (isCustomText(v) && /^#[0-9a-f]{6}$/i.test(String(v)) ? v : '#FFFFFF')
+
 const MOVIE_OPTIONS = [
   { key: 'showRatings', labelKey: 'cardStudio.ratings' },
   { key: 'showYear', labelKey: 'cardStudio.year' },
@@ -341,7 +359,10 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
                 value={config.bgColor}
                 onChange={(e) => set({ bgColor: e.target.value })}
                 aria-label={t('cardStudio.customColor')}
-                className="h-7 w-9 cursor-pointer border border-zinc-300 bg-white"
+                title={t('cardStudio.customColor')}
+                className={`h-7 w-9 cursor-pointer border bg-white transition ${
+                  isCustomBg(config.bgColor) ? 'border-black ring-2 ring-inset ring-black' : 'border-zinc-300'
+                }`}
               />
             </div>
           </Section>
@@ -364,10 +385,13 @@ export default function CardStudio({ movie, specs, specsLoading, ratings, rating
               ))}
               <input
                 type="color"
-                value={TEXT_COLORS.find((t) => t.id === config.textColor)?.hex || '#FFFFFF'}
+                value={textColorHexOf(config.textColor)}
                 onChange={(e) => set({ textColor: e.target.value })}
                 aria-label={t('cardStudio.customColor')}
-                className="h-7 w-9 cursor-pointer border border-zinc-300 bg-white"
+                title={t('cardStudio.customColor')}
+                className={`h-7 w-9 cursor-pointer border bg-white transition ${
+                  isCustomText(config.textColor) ? 'border-black ring-2 ring-inset ring-black' : 'border-zinc-300'
+                }`}
               />
             </div>
           </Section>
