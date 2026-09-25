@@ -20,6 +20,14 @@ const SmartImage = memo(function SmartImage({
   onClick,
   selected = false,
   crossOrigin,
+  // lazy=false：不使用 loading="lazy"，拿到槽位就立刻发请求。
+  // 给「一次给一整套、且用户已经主动展开」的图用（剧照网格）：开着的 lazy 会让
+  // 视口外的图**占着槽位却不发请求**，8s 超时到点 → 重试 → 再超时 → 判失败，
+  // 于是没滚到的那几张反而被标成「加载失败」。视口外就真的不该加载的场景，
+  // 交给 lazy 以外的机制（条件挂载）更干净。
+  lazy = true,
+  // 彻底放弃时回调一次（重试已用尽），参数是原始的 src。
+  onError,
 }) {
   const [status, setStatus] = useState(src ? 'loading' : 'error')
   const [imgSrc, setImgSrc] = useState(null)
@@ -28,6 +36,10 @@ const SmartImage = memo(function SmartImage({
   const releaseRef = useRef(null)
   const cancelledRef = useRef(false)
   const timeoutRef = useRef(null)
+
+  // 用 ref 存回调：它不该进 effect 依赖，否则调用方每次渲染换个函数就会重跑加载
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
 
   // src 变化 → 重置状态并加载
   useEffect(() => {
@@ -46,8 +58,16 @@ const SmartImage = memo(function SmartImage({
     setRetry(0)
     setImgSrc(null)
 
+    // disposed 是**本次 effect 运行**的作废标记，必须与 cancelledRef 分开：
+    // StrictMode 的双挂载是 挂载A → 清理A → 挂载B，而清理A 会把 cancelledRef 重置回
+    // false 的是挂载B。于是排队中的 acquireSlot()（队列满时它要等）在 A 之后才 resolve，
+    // 此刻 cancelledRef 已是 false，槽位被认领；紧接着 B 的 promise 也 resolve，
+    // 覆盖掉 releaseRef —— A 拿到的 releaser 从此无人引用，那个槽位永久泄漏。
+    // 槽位漏满 8 个，队列就彻底不动（实测 active=8 / waiting=120，页面图片全卡住）。
+    let disposed = false
+
     acquireSlot().then((release) => {
-      if (cancelledRef.current) {
+      if (disposed || cancelledRef.current) {
         release()
         return
       }
@@ -57,7 +77,7 @@ const SmartImage = memo(function SmartImage({
 
       // 超时保护：如果 img 长时间不触发 onLoad/onError，主动重试
       timeoutRef.current = setTimeout(() => {
-        if (cancelledRef.current) return
+        if (disposed || cancelledRef.current) return
         const img = imgRef.current
         if (img && (!img.complete || img.naturalWidth === 0)) {
           release()
@@ -66,12 +86,14 @@ const SmartImage = memo(function SmartImage({
             setRetry(r => r + 1)
           } else {
             setStatus('error')
+            onErrorRef.current?.(src)
           }
         }
       }, LOAD_TIMEOUT + (retry * 1000))
     })
 
     return () => {
+      disposed = true
       cancelledRef.current = true
       if (releaseRef.current) { releaseRef.current(); releaseRef.current = null }
       if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
@@ -88,10 +110,13 @@ const SmartImage = memo(function SmartImage({
     if (releaseRef.current) { releaseRef.current(); releaseRef.current = null }
     if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null }
 
+    // 同上：每次重试都是一次独立的 effect 运行，兜住排队中被作废的那次
+    let disposed = false
+
     const delay = RETRY_DELAYS[Math.min(retry - 1, RETRY_DELAYS.length - 1)]
     const timer = setTimeout(() => {
       acquireSlot().then((release) => {
-        if (cancelledRef.current) {
+        if (disposed || cancelledRef.current) {
           release()
           return
         }
@@ -100,7 +125,7 @@ const SmartImage = memo(function SmartImage({
         setImgSrc(actualSrc)
 
         timeoutRef.current = setTimeout(() => {
-          if (cancelledRef.current) return
+          if (disposed || cancelledRef.current) return
           const img = imgRef.current
           if (img && (!img.complete || img.naturalWidth === 0)) {
             release()
@@ -109,6 +134,7 @@ const SmartImage = memo(function SmartImage({
               setRetry(r => r + 1)
             } else {
               setStatus('error')
+              onErrorRef.current?.(src)
             }
           }
         }, LOAD_TIMEOUT + (retry * 1000))
@@ -116,6 +142,7 @@ const SmartImage = memo(function SmartImage({
     }, delay)
 
     return () => {
+      disposed = true
       cancelledRef.current = true
       clearTimeout(timer)
       if (releaseRef.current) { releaseRef.current(); releaseRef.current = null }
@@ -168,7 +195,7 @@ const SmartImage = memo(function SmartImage({
         ref={imgRef}
         src={imgSrc || undefined}
         alt={alt}
-        loading="lazy"
+        loading={lazy ? 'lazy' : 'eager'}
         decoding="async"
         crossOrigin={crossOrigin}
         onLoad={() => {
@@ -183,6 +210,7 @@ const SmartImage = memo(function SmartImage({
             setRetry(retry + 1)
           } else {
             setStatus('error')
+            onErrorRef.current?.(src)
           }
         }}
         style={{ objectFit }}

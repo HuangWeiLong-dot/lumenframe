@@ -102,8 +102,18 @@ IMG_TTL = 60 * 60               # 图片缓存 1 小时
 IMG_CACHE_MAX = 120
 img_cache = OrderedDict()       # key: 原始图片 URL -> (timestamp, bytes, content_type)
 
-# 同时向 FilmGrab 发起的图片下载并发上限
-PROXY_SEMAPHORE = asyncio.Semaphore(int(os.environ.get("PROXY_CONCURRENCY", "8")))
+# 同时向 FilmGrab 发起的图片下载并发上限。
+# 取值用容错解析：PROXY_CONCURRENCY 被设成空串时 int("") 会在导入期抛 ValueError，
+# 整个服务起不来 —— 而这个变量在文档里是「可配置」的，值得挡一下。
+def _int_env(name, default):
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        logger.warning("环境变量 %s 不是整数，回退默认值 %s", name, default)
+        return default
+
+
+PROXY_SEMAPHORE = asyncio.Semaphore(max(1, _int_env("PROXY_CONCURRENCY", 8)))
 
 # ---------- Torrent-Api-py 路由挂载 ----------
 # 统一挂在 /api/torrent/v1 下，与既有 /api/* 接口隔离；
@@ -186,13 +196,27 @@ async def screenshots(
 
 
 @app.get("/api/proxy")
-async def proxy(url: str = Query(..., description="FilmGrab 图片原始地址（需 URL 编码）")):
-    """白名单校验后实时代理转发 FilmGrab 图片，返回二进制流。"""
+async def proxy(
+    url: str = Query(..., description="FilmGrab 图片原始地址（需 URL 编码）"),
+    s: str = Query("full", description="thumb = 取站点缩略图（列表网格用），full = 原图"),
+):
+    """
+    白名单校验后实时代理转发 FilmGrab 图片，返回二进制流。
+
+    s=thumb 时改抓站点的 /thumb/ 变体（500px / 54-91 KB，原图是 1023-1280px / 152-299 KB）：
+    详情页的剧照网格一格只有 ~265px 宽，65 张原图约 8.5 MB，换成缩略图后约 4.5 MB，
+    这是那一片格子加载慢、加载不完的直接原因。
+    抓不到缩略图就回退原图并照常返回 —— 少一张缩略图不该让一格留空。
+    """
     # 白名单校验：拒绝非 FilmGrab 域名/非图片路径，防止被当作任意开放代理
     if not fg.is_allowed_image_url(url):
         raise HTTPException(status_code=403, detail="only FilmGrab image URLs are allowed")
 
-    cached = _img_cache_get(url)
+    # 实际抓取的地址（缩略图推导不出版本就是原图），它同时是缓存的键：
+    # 同一张图的两种尺寸各存一份，互不覆盖。
+    fetch_url = (fg.thumb_variant(url) if s == "thumb" else None) or url
+
+    cached = _img_cache_get(fetch_url)
     if cached is not None:
         content, content_type = cached
         return Response(
@@ -203,12 +227,20 @@ async def proxy(url: str = Query(..., description="FilmGrab 图片原始地址�
 
     async with PROXY_SEMAPHORE:
         try:
-            content, content_type = await asyncio.to_thread(fg.fetch_image, url)
+            content, content_type = await asyncio.to_thread(fg.fetch_image, fetch_url)
         except Exception as exc:
-            logger.warning("图片代理失败 %s: %s", url, exc)
-            raise HTTPException(status_code=502, detail="failed to fetch upstream image")
+            if fetch_url == url:
+                logger.warning("图片代理失败 %s: %s", url, exc)
+                raise HTTPException(status_code=502, detail="failed to fetch upstream image")
+            logger.warning("缩略图不可用，回退原图 %s: %s", fetch_url, exc)
+            try:
+                content, content_type = await asyncio.to_thread(fg.fetch_image, url)
+            except Exception as exc2:
+                logger.warning("图片代理失败 %s: %s", url, exc2)
+                raise HTTPException(status_code=502, detail="failed to fetch upstream image")
+            fetch_url = url
 
-    _img_cache_set(url, content, content_type)
+    _img_cache_set(fetch_url, content, content_type)
     return Response(
         content=content,
         media_type=content_type,

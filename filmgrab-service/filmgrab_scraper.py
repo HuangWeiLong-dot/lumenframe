@@ -27,7 +27,7 @@ import re
 import time
 import difflib
 import logging
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 from curl_cffi import requests as cffi_requests
 from bs4 import BeautifulSoup
@@ -40,6 +40,8 @@ SEARCH_URL = "https://film-grab.com/"
 ALLOWED_HOSTS = {"film-grab.com", "www.film-grab.com"}
 # 图片必须位于上传目录，防止把站内任意 URL 当图片代理
 IMAGE_PATH_PREFIX = "/wp-content/uploads/"
+# 相册原图与缩略图的共同前缀：缩略图是 photo-gallery/thumb/<同名文件>
+_THUMB_MARKER = "/wp-content/uploads/photo-gallery/"
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
 
 # 伪装浏览器；Referer 用于绕过潜在防盗链（当前实测不强制，属于防御性设置）
@@ -310,6 +312,29 @@ def fetch_screenshots(movie, year=None):
         "count": len(screenshots),
         "screenshots": screenshots,
     }
+
+
+def thumb_variant(url):
+    """
+    推导原图对应的站点缩略图 URL（保留 query，如 bwg 版本号），推导不出返回 None。
+
+    10Web 相册为每张原图同时生成了一份 /thumb/ 变体，实测（2026-09-25）：
+      原图 1023-1280px 宽 / 152-299 KB，缩略图固定 500px 宽 / 54-91 KB ≈ 原图的 40%。
+    详情页网格一格的显示宽度只有 ~265px，用缩略图足够；卡片导出与灯箱仍取原图。
+
+    非 photo-gallery 路径、路径为空、或本身就是 /thumb/ 下的一律返回 None，
+    调用方据此回退原图 —— 推导不出不是错误，只是没有更小的版本可用。
+    """
+    parsed = urlparse(url)
+    path = parsed.path
+    idx = path.find(_THUMB_MARKER)
+    if idx < 0:
+        return None
+    head = path[:idx + len(_THUMB_MARKER)]
+    tail = path[idx + len(_THUMB_MARKER):]
+    if not tail or tail.startswith("thumb/"):
+        return None
+    return urlunparse(parsed._replace(path=head + "thumb/" + tail))
 
 
 def is_allowed_image_url(url):
