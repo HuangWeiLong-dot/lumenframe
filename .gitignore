@@ -38,3 +38,9 @@ Torrent-Api-py/
 docs/
 .claude/
 
+
+# Python 字节码：filmgrab-service 的 __pycache__ 曾被整个提交进仓库（37 个 .pyc），
+# 于是每跑一次服务，工作区就会多出一堆二进制改动 —— 这些文件是 import 时自动生成的，
+# 与源码无关，进版本库只会在 diff 里添噪声。这里一并从索引里摘掉（本地文件保留）。
+__pycache__/
+*.py[cod]
