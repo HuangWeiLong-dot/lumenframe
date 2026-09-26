@@ -247,7 +247,8 @@ export default function QuizRecommender() {
                   active={genres.includes(g.id)}
                   onClick={() => toggleGenre(g.id)}
                 >
-                  {g.name}
+                  {/* 静态表是英文名，展示走 i18n（zh 下显示中文类型名） */}
+                  {t(`quiz.genre.${g.name}`)}
                 </Chip>
               ))}
             </div>

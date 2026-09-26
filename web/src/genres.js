@@ -54,3 +54,20 @@ export function genreIdByName(name, kind) {
   const table = kind === 'tv' ? TV_GENRES_BY_NAME : MOVIE_GENRES_BY_NAME
   return table[name] ?? null
 }
+
+// TMDB 个别类型在 zh-CN 下至今没有翻译条目（/api/genres 按语言请求后这两个
+// 仍原样返回英文名），展示时按 id 用 i18n 词典覆盖；其余类型信任上游的本地化名。
+// t() 缺 key 会回退成 key 本身，所以只对已知缺失的 id 查词典。
+const UNTRANSLATED_GENRE_IDS = new Set([10765, 10768])
+
+// genre 可以是 /api/genres 的 { id, name }，也可以是裸英文名（TVmaze 类型串、
+// 旧链接）—— 裸名先查静态表换算成 id 再走同一套覆盖。
+export function genreDisplayName(genre, t, kind) {
+  if (genre && typeof genre === 'object') {
+    if (UNTRANSLATED_GENRE_IDS.has(Number(genre.id))) return t(`tmdbGenre.${genre.id}`)
+    return genre.name
+  }
+  const id = kind ? genreIdByName(genre, kind) : null
+  if (id != null && UNTRANSLATED_GENRE_IDS.has(id)) return t(`tmdbGenre.${id}`)
+  return genre
+}

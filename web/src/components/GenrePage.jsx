@@ -4,6 +4,7 @@ import StatusBadge from './StatusBadge'
 import NavLink from './NavLink'
 import { apiUrlWithLang, posterUrl } from '../api'
 import { titleUrl } from '../routes'
+import { genreDisplayName } from '../genres'
 import { setDocTitle } from '../docTitle'
 import { useI18n } from '../i18n'
 
@@ -65,12 +66,12 @@ export default function GenrePage({ kind, genreId, genreName, isInLikes, toggleL
         const list = (await r.json())[kind] || []
         // movie / tv 的类型 id 是各自独立的命名空间，所以按 kind 取表
         const hit = list.find((g) => String(g.id) === String(genreId))
-        if (alive && hit) setFetchedName(hit.name)
+        if (alive && hit) setFetchedName(genreDisplayName(hit, t))
       } catch { /* 静默：名字取不到就退化成「类型」，不影响列表 */ }
     })()
     return () => { alive = false }
   }, [genreName, kind, genreId, apiLang])
-  const displayName = genreName || fetchedName
+  const displayName = genreName ? genreDisplayName(genreName, t, kind) : fetchedName
 
   // 标签页标题：类型名 + 电影/剧集。带上后者是因为 movie 和 tv 各有一套类型表，
   // 光看「动作」分不清是新开的哪个页面。
