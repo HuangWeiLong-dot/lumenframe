@@ -49,7 +49,7 @@ const API_SOURCES = [
   { name: 'ShotOnWhat?', url: 'https://shotonwhat.com' },
 ]
 
-export default function Header({ onHome, onLibrary }) {
+export default function Header({ onHome, onLibrary, onDiscover }) {
   const [open, setOpen] = useState(false)
   const { t, lang, setLang } = useI18n()
   const auth = useAuth()
@@ -78,6 +78,12 @@ export default function Header({ onHome, onLibrary }) {
 
         {/* 右侧：桌面 Library + 账号 + 语言 + References + 移动端汉堡 */}
         <div className="flex items-center gap-3">
+          <button
+            onClick={onDiscover}
+            className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
+          >
+            {t('header.discover')}
+          </button>
           <button
             onClick={onLibrary}
             className="hidden text-xs uppercase tracking-[0.2em] text-black transition hover:opacity-60 sm:block"
@@ -189,6 +195,15 @@ export default function Header({ onHome, onLibrary }) {
               </svg>
             </button>
           )}
+          <button
+            onClick={() => { setOpen(false); onDiscover?.() }}
+            className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"
+          >
+            <span>{t('header.discover')}</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-zinc-400">
+              <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+            </svg>
+          </button>
           <button
             onClick={() => { setOpen(false); onLibrary?.() }}
             className="flex items-center justify-between px-4 py-3.5 text-sm text-black transition hover:bg-zinc-100"

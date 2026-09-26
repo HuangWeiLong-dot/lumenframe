@@ -39,6 +39,11 @@ export function libraryUrl() {
   return `${BASE_PATH}library`
 }
 
+// 筛选发现页：{BASE}discover（可选 /movie|/tv 标注当前标签，筛选条件不进 URL）
+export function discoverUrl(kind) {
+  return `${BASE_PATH}discover${kind === 'movie' || kind === 'tv' ? `/${kind}` : ''}`
+}
+
 // ---- 路径解析（从当前 location 判断落在哪个页面）----
 
 // 从当前 location 解析标题路由；非标题页返回 null
@@ -59,6 +64,12 @@ export function parseGenreRoute() {
 
 export function parseLibraryRoute() {
   return /\/library\/?$/.test(window.location.pathname)
+}
+
+// 从当前 location 解析筛选发现页；非该页返回 null，命中返回 { kind }
+export function parseDiscoverRoute() {
+  const m = window.location.pathname.match(/\/discover(?:\/(movie|tv))?\/?$/)
+  return m ? { kind: m[1] || 'tv' } : null
 }
 
 // ---- 新标签页 ----

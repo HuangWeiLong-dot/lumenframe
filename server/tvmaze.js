@@ -162,6 +162,32 @@ export async function getShow(id) {
   }
 }
 
+// 外部 id 反查剧集 id（TMDB external_ids → TVmaze）。
+// 优先 thetvdb，其次 imdb；都缺或都未命中返回 null。
+// 返回值只有 id 与外部 id 有关，与语言无关，调用方放心缓存。
+//
+// /lookup/shows 命中时不返回 200，而是 **301 → /shows/{id}**（实测），
+// 且 httpsGet 不跟随重定向 —— 所以直接从 Location 里抠 id，省一次回程；
+// 未命中则是普通 404。
+export async function lookupShowId({ imdb, tvdb } = {}) {
+  for (const query of [
+    tvdb ? `thetvdb=${encodeURIComponent(tvdb)}` : null,
+    imdb ? `imdb=${encodeURIComponent(imdb)}` : null,
+  ].filter(Boolean)) {
+    try {
+      const r = await httpsGet(`/lookup/shows?${query}`)
+      if (r.ok) {
+        const hit = r.json()
+        if (hit?.id) return hit.id
+      } else if ([301, 302, 303, 307, 308].includes(r.status)) {
+        const m = String(r.headers.location || '').match(/\/shows\/(\d+)/)
+        if (m) return Number(m[1])
+      }
+    } catch { /* 单条查询失败（超时等）落到下一个 key 或返回 null */ }
+  }
+  return null
+}
+
 export async function getEpisodes(id) {
   const data = await tvmaze(`/shows/${id}/episodes`)
   if (!data) return []

@@ -7,7 +7,7 @@ import { getSpecs } from './sow.js'
 import { getRatings } from './ratings.js'
 import { tastediveSimilar } from './tastedive.js'
 import { titleScore, normalizeTitle } from './titlematch.js'
-import { searchShows, searchShowsRaw, getShow, getEpisodes, parseTvImageUrl, fetchTvImage } from './tvmaze.js'
+import { searchShows, searchShowsRaw, getShow, getEpisodes, parseTvImageUrl, fetchTvImage, lookupShowId } from './tvmaze.js'
 import { resolveTmdbTv, localizeShow, localizeSummaries } from './tvmeta.js'
 import { searchSubtitles, downloadSubtitle } from './subtitles.js'
 import sourcesRouter from './sources.js'
@@ -557,6 +557,123 @@ app.get('/api/genres', async (req, res) => {
     const pick = (data) =>
       (data.genres || []).map((g) => ({ id: g.id, name: g.name }))
     res.json({ movie: pick(mv), tv: pick(tv) })
+  } catch (e) {
+    res.status(502).json({ error: e.message })
+  }
+})
+
+// ============ 筛选发现（索引页：地区/类型/年代 + 排序 + 分页） ============
+
+// 地区白名单（TMDB with_origin_country 的 ISO 3166 码）。TV discover 原生支持该参数；
+// 电影端 TMDB 历史上只认 TV，未支持时会静默忽略该参数（表现为「全部」，可接受的退化）。
+const DISCOVER_COUNTRIES = new Set(['CN', 'JP', 'US', 'GB', 'KR'])
+
+// 年代 → 日期区间：discover 的年份过滤只能用日期 gte/lte（年份排序/筛选没有裸年份参数）
+const DISCOVER_DECADES = {
+  '2020s': ['2020-01-01', '2029-12-31'],
+  '2010s': ['2010-01-01', '2019-12-31'],
+  '2000s': ['2000-01-01', '2009-12-31'],
+  '1990s': ['1990-01-01', '1999-12-31'],
+  '1980s': ['1980-01-01', '1989-12-31'],
+  older: [null, '1979-12-31'],
+}
+
+// TMDB id → TVmaze id：external_ids（thetvdb 优先、imdb 兜底）→ TVmaze lookup。
+// 本站剧集详情页的身份是 TVmaze id，而 discover 返回 TMDB id —— 不解析的话
+// 点进详情页会拿 TMDB id 去 TVmaze 查出另一部剧。映射恒定，按 TMDB id 缓存
+// （0 表示解析失败，同样入缓存避免每个分页反复重试）；与语言无关。
+async function tvmazeIdFromTmdb(tmdbId) {
+  return cached(`tvresolve:${tmdbId}`, async () => {
+    try {
+      const ext = await tmdb(`/tv/${tmdbId}/external_ids`, {}, 'en-US')
+      return (await lookupShowId({ imdb: ext?.imdb_id, tvdb: ext?.tvdb_id })) || 0
+    } catch {
+      return 0
+    }
+  })
+}
+
+// 筛选发现：TMDB discover 的白名单代理（参数越界一律回落默认值，不接受自由透传）
+// ?genre=  TMDB genre id；?country= ISO 码；?decade= 年代键；?sort= 排序键；?page=
+app.get('/api/discover/:kind', async (req, res) => {
+  const kind = req.params.kind === 'tv' ? 'tv' : 'movie'
+  const page = Math.max(1, Number(req.query.page) || 1)
+  const lang = reqLang(req)
+  const genre = String(req.query.genre || '').trim()
+  const country = String(req.query.country || '').trim().toUpperCase()
+  const decade = String(req.query.decade || '').trim()
+  const sort = ['popularity', 'newest', 'rating', 'votes'].includes(req.query.sort)
+    ? req.query.sort
+    : 'popularity'
+
+  const params = {
+    sort_by: 'popularity.desc',
+    page: String(page),
+    include_adult: 'false',
+    // 与类型页同策略：压掉无评分的垃圾条目（评分排序下另有更严的下限）
+    'vote_count.gte': kind === 'tv' ? 50 : 100,
+  }
+  if (sort === 'newest') {
+    // 最新上线：按首播/上映日期倒序，设日期上限滤掉未开播/未上映的未来条目，
+    // 评分下限放宽（新片样本少）
+    params.sort_by = kind === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc'
+    params['vote_count.gte'] = 5
+    params[kind === 'tv' ? 'first_air_date.lte' : 'primary_release_date.lte'] =
+      new Date().toISOString().slice(0, 10)
+  } else if (sort === 'rating') {
+    params.sort_by = 'vote_average.desc'
+  } else if (sort === 'votes') {
+    // 评价人数：追剧/热度之外的一个人气体量，不需要评分下限
+    params.sort_by = 'vote_count.desc'
+    delete params['vote_count.gte']
+  }
+  if (/^\d+$/.test(genre)) params.with_genres = genre
+  if (DISCOVER_COUNTRIES.has(country)) params.with_origin_country = country
+  if (DISCOVER_DECADES[decade]) {
+    const [gte, lte] = DISCOVER_DECADES[decade]
+    const dateField = kind === 'tv' ? 'first_air_date' : 'primary_release_date'
+    if (gte) params[`${dateField}.gte`] = gte
+    if (lte) params[`${dateField}.lte`] = lte
+  }
+
+  try {
+    const data = await cached(
+      lk(`discover:${kind}:${genre}:${country}:${decade}:${sort}:p${page}`, lang),
+      () => tmdb(`/discover/${kind}`, params, lang)
+    )
+    const rows = (data.results || []).filter((m) => m.poster_path)
+    const base = rows.map((m) => ({
+      title: m.title || m.name,
+      year: (m.release_date || m.first_air_date || '').slice(0, 4),
+      rating: m.vote_average,
+      poster_path: m.poster_path,
+    }))
+
+    let items
+    if (kind === 'movie') {
+      items = base.map((b, i) => ({ ...b, kind: 'movie', id: rows[i].id }))
+    } else {
+      // 剧集：逐条解析 TVmaze id（并行 + 每条独立缓存）。解析失败的条目 id=null，
+      // 前端渲染为不可点进的卡片而不是指错剧。tvmaze id 去重防同剧双条目。
+      const resolved = await Promise.all(
+        rows.map(async (m) => ({ tmdb_id: m.id, tvmaze_id: await tvmazeIdFromTmdb(m.id) }))
+      )
+      const seen = new Set()
+      items = []
+      for (let i = 0; i < base.length; i++) {
+        const { tvmaze_id } = resolved[i]
+        if (tvmaze_id && seen.has(tvmaze_id)) continue
+        if (tvmaze_id) seen.add(tvmaze_id)
+        items.push({ ...base[i], kind: 'tv', id: tvmaze_id || null, tmdb_id: resolved[i].tmdb_id })
+      }
+    }
+
+    res.json({
+      page,
+      total_pages: data.total_pages || 1,
+      total_results: data.total_results || 0,
+      items,
+    })
   } catch (e) {
     res.status(502).json({ error: e.message })
   }

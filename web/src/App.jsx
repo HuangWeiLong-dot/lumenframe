@@ -25,8 +25,8 @@ import { apiUrl, apiUrlWithLang, posterUrl, posterFor, downloadImage } from './a
 import { genreIdByName } from './genres'
 import { BASE_PATH, resolveSpaRedirect } from './spaUrl'
 import {
-  titleUrl, personUrl, genreUrl, libraryUrl,
-  parseTitleRoute, parsePersonRoute, parseGenreRoute, parseLibraryRoute,
+  titleUrl, personUrl, genreUrl, libraryUrl, discoverUrl,
+  parseTitleRoute, parsePersonRoute, parseGenreRoute, parseLibraryRoute, parseDiscoverRoute,
   preopenTab, setTabUrl, closeTab,
 } from './routes'
 import NavLink from './components/NavLink'
@@ -44,6 +44,7 @@ const CardStudio = lazy(() => import('./components/CardStudio'))
 const LibraryPage = lazy(() => import('./components/LibraryPage'))
 const PersonPage = lazy(() => import('./components/PersonPage'))
 const GenrePage = lazy(() => import('./components/GenrePage'))
+const DiscoverPage = lazy(() => import('./components/DiscoverPage'))
 
 // ---- 极简 History API 路由 ----
 // 电影：{BASE}movie/{tmdbId}-{slug}；剧集：{BASE}tv/{tvmazeId}-{slug}
@@ -235,6 +236,7 @@ export default function App() {
   const initialLibraryRef = useRef(parseLibraryRoute())
   const initialPersonRef = useRef(parsePersonRoute())
   const initialGenreRef = useRef(parseGenreRoute())
+  const initialDiscoverRef = useRef(parseDiscoverRoute())
   const [view, setView] = useState(
     initialLibraryRef.current
       ? 'library'
@@ -242,7 +244,12 @@ export default function App() {
         ? 'person'
         : initialGenreRef.current
           ? 'genre'
-          : 'home'
+          : initialDiscoverRef.current
+            ? 'discover'
+            : 'home'
+  )
+  const [discover, setDiscover] = useState(
+    initialDiscoverRef.current ? { kind: initialDiscoverRef.current.kind } : null
   )
   const [person, setPerson] = useState(
     initialPersonRef.current ? { id: initialPersonRef.current.id, name: '' } : null
@@ -647,6 +654,22 @@ export default function App() {
     if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // 打开筛选发现页（kind = 电影/剧集标签；筛选/排序条件留在组件内，不进 URL）
+  function openDiscover(kind, { history: historyOpt = 'push', scroll = true } = {}) {
+    reqTokenRef.current++
+    resetMovieView()
+    setDiscover({ kind: kind === 'movie' ? 'movie' : 'tv' })
+    setView('discover')
+    const url = discoverUrl(kind)
+    if (historyOpt === 'push') {
+      window.history.pushState({ discover: true, kind }, '', url)
+      canBackRef.current = true
+    } else if (window.location.pathname !== url) {
+      window.history.replaceState({ discover: true, kind }, '', url)
+    }
+    if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   // 详情页点击 genres 字符串时调用：优先用静态英文名映射表反查 TMDB id；
   // 中文界面下类型名是中文（映射表命中不了），用后端返回的 genre_ids[idx] 兜底
   function openGenreByName(name, kind, idx) {
@@ -694,8 +717,9 @@ export default function App() {
       const titleRoute = parseTitleRoute()
       const personRoute = parsePersonRoute()
       const genreRoute = parseGenreRoute()
-      // 后退/前进到标题/演职员/类型页时仍可继续后退；落到主页/库页则 Back 应回主页
-      canBackRef.current = titleRoute != null || personRoute != null || genreRoute != null
+      const discoverRoute = parseDiscoverRoute()
+      // 后退/前进到标题/演职员/类型/发现页时仍可继续后退；落到主页/库页则 Back 应回主页
+      canBackRef.current = titleRoute != null || personRoute != null || genreRoute != null || discoverRoute != null
       if (titleRoute != null) {
         openTitle(titleRoute.kind, titleRoute.id, { history: 'none', scroll: false })
       } else if (personRoute != null) {
@@ -708,6 +732,11 @@ export default function App() {
         resetMovieView()
         setGenre({ kind: genreRoute.kind, id: genreRoute.id, name: '' })
         setView('genre')
+      } else if (discoverRoute != null) {
+        reqTokenRef.current++
+        resetMovieView()
+        setDiscover({ kind: discoverRoute.kind })
+        setView('discover')
       } else if (parseLibraryRoute()) {
         reqTokenRef.current++
         resetMovieView()
@@ -728,7 +757,10 @@ export default function App() {
       <PosterBackground />
       {/* 首次访问（localStorage 里还没有语言选择）时弹出的语言偏好选择 */}
       <LanguagePicker />
-      <Header onHome={goHome} onLibrary={goLibrary} />
+      <Header onHome={goHome} onLibrary={goLibrary} onDiscover={() => {
+        // 已在发现页时不重复入栈（重复 push 同一 URL 会堆历史条目）
+        if (view !== 'discover') openDiscover('tv')
+      }} />
       {/* 左侧固定收藏栏（收起的抽屉）：Pin 后卡片从右侧滑入并常驻页面左边缘 */}
       <PinnedDrawer
         pinned={pins.pinned}
@@ -781,6 +813,20 @@ export default function App() {
                 genreName={genre.name}
                 isInLikes={lib.isInLikes}
                 toggleLike={lib.toggleLike}
+                onBack={() => (canBackRef.current ? window.history.back() : goHome())}
+              />
+            </Suspense>
+          )}
+        </main>
+      ) : view === 'discover' ? (
+        <main
+          className="mx-auto flex w-full flex-1 flex-col pt-20 sm:pt-24"
+        >
+          {discover && (
+            <Suspense fallback={null}>
+              <DiscoverPage
+                kind={discover.kind}
+                onKindChange={(next) => openDiscover(next)}
                 onBack={() => (canBackRef.current ? window.history.back() : goHome())}
               />
             </Suspense>
