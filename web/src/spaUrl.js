@@ -9,10 +9,12 @@ export function resolveSpaRedirect() {
   const params = new URLSearchParams(window.location.search)
   const spa = params.get('_spa')
   if (!spa) return
-  // 递归解包 _spa= 参数（最多 20 层）
+  // 递归解包 _spa= 参数。上限 64：404 段表漏段的年代曾产生过 30 多层嵌套的脏链
+  // （收藏夹/分享出去的 URL），20 层解不完会留下残渣；64 足够余量且仍防失控。
   let path = spa
-  for (let i = 0; i < 20; i++) {
-    const m = path.match(/_spa=([^&]+)/)
+  for (let i = 0; i < 64; i++) {
+    // _spa 后面的 = 也可能被再编码成 %3D（多层重定向链里出现过），一并匹配
+    const m = path.match(/_spa(?:=|%3d)([^&]+)/i)
     if (!m) break
     path = decodeURIComponent(m[1])
   }
@@ -22,7 +24,9 @@ export function resolveSpaRedirect() {
 }
 
 // 站内一级路由段。与 public/404.html 的 detectRoot 是同一份判据，改一处必须改另一处。
-const ROUTE_SEGMENTS = new Set(['movie', 'tv', 'person', 'genre', 'library'])
+// 漏段的下场：/discover/tv 曾因缺 'discover' 让 getBasePath 把 'tv' 当仓库前缀，
+// BASE_PATH 冻结成 /discover/，页内所有链接都被带上这个前缀（404 → 循环）。
+const ROUTE_SEGMENTS = new Set(['movie', 'tv', 'person', 'genre', 'discover', 'library'])
 
 // 运行时推导站点根路径。不能直接用 import.meta.env.BASE_URL：它是构建期写死的
 // （'/' 或 '/<repo>/'），而这里要在运行时同时应付两种布局。

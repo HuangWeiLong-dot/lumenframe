@@ -25,7 +25,10 @@
         // 算出 /<repo>/genre/ 这个不存在的目录，重定向过去又是一次 404 —— 死循环。
         // 判据与 src/spaUrl.js 的 getBasePath 保持一致，改一处必须改另一处。
         function detectRoot(path) {
-          var KNOWN = { movie: 1, tv: 1, person: 1, genre: 1, library: 1, assets: 1, api: 1, filmgrab: 1, 'card-studio': 1 }
+          // 段表漏一个一级路由段就会出大事：/discover/tv 曾因缺 'discover' 把
+          // 'tv' 误判成仓库前缀，根被算成 /discover/，跳过去的 /discover/?_spa=...
+          // 又不是磁盘资产，再次进 404.html —— 每跳一层嵌套一次，死循环。
+          var KNOWN = { movie: 1, tv: 1, person: 1, genre: 1, discover: 1, library: 1, assets: 1, api: 1, filmgrab: 1, 'card-studio': 1 }
           var segs = path.split('/')
           // segs[0] 恒为空串，从 1 开始
           for (var i = 1; i < segs.length; i++) {
